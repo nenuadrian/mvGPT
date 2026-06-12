@@ -1,0 +1,7 @@
+video/
+data/
+.DS_Store
+*.pt
+.venv
+.ipynb_checkpoints
+
