@@ -2,14 +2,27 @@
 
     python sft.py 10
 """
+import json
+import os
 import re
+import sys
+import textwrap
+import time
 
 import numpy as np
 import torch
 
+from checkpoint import CHECKPOINTS, load_checkpoint, save_checkpoint
+from data import DATA_DIR
+from model import pick_device
+from sample import write
 from tokenizer import EOT
 
+RUN_DIR = os.path.join(CHECKPOINTS, "sft")
 BATCH_SIZE = 48
+LR = 2e-4
+EVAL_EVERY = 250
+DEMO = "Features: Dialogue\nWords: dog, happy, park\nSummary: A dog makes a new friend at the park.\nStory:"
 
 # The fields of an instruction, in the order our prompts give them, before the story.
 FIELDS = ["Features", "Words", "Random sentence", "Summary"]
@@ -71,3 +84,66 @@ def estimate_loss(model, examples, pad_id, batches=20):
         total += model(x, y)[1].item()
     model.train()
     return total / batches
+
+
+def main(minutes):
+    torch.manual_seed(1337)
+    device = pick_device()
+    model, tokenizer, _ = load_checkpoint(os.path.join(CHECKPOINTS, "pretrain", "model.pt"), device)
+    block_size = model.config.block_size
+    train = build_examples(os.path.join(DATA_DIR, "instruct_train.txt"), tokenizer, block_size)
+    valid = build_examples(os.path.join(DATA_DIR, "instruct_valid.txt"), tokenizer, block_size, limit=5000)
+    print(f"{len(train):,} training examples, {len(valid):,} held out")
+
+    # A lower learning rate than pretraining: we adjust what the model knows, not replace it.
+    params = list(model.parameters())
+    optimizer = torch.optim.AdamW(
+        [
+            {"params": [p for p in params if p.dim() >= 2], "weight_decay": 0.1},
+            {"params": [p for p in params if p.dim() < 2], "weight_decay": 0.0},
+        ],
+        lr=LR,
+        betas=(0.9, 0.95),
+    )
+
+    log = {"steps": [], "evals": []}
+
+    def evaluate(step, elapsed):
+        losses = {"train": estimate_loss(model, train, tokenizer.pad_id),
+                  "valid": estimate_loss(model, valid, tokenizer.pad_id)}
+        story = write(model, tokenizer, DEMO, max_new_tokens=120, with_prompt=False)
+        log["evals"].append({"step": step, "minutes": round(elapsed / 60, 2), "train": round(losses["train"], 4),
+                             "valid": round(losses["valid"], 4), "sample": story})
+        print(f"step {step:>5} | train {losses['train']:.3f} | valid {losses['valid']:.3f}", flush=True)
+        print(textwrap.indent(textwrap.fill(story, width=86), "  "), flush=True)
+        os.makedirs(RUN_DIR, exist_ok=True)
+        with open(os.path.join(RUN_DIR, "log.json"), "w") as f:
+            json.dump(log, f, indent=1)
+
+    budget = minutes * 60
+    start = time.time()
+    step = 0
+    evaluate(step, 0)
+    while time.time() - start < budget:
+        x, y = random_batch(train, tokenizer.pad_id, device)
+        _, loss = model(x, y)
+        optimizer.zero_grad(set_to_none=True)
+        loss.backward()
+        torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+        optimizer.step()
+        step += 1
+
+        if step % 50 == 0:
+            log["steps"].append({"step": step, "loss": round(loss.item(), 4)})
+            print(f"step {step:>5} | loss {loss.item():.3f} | {(time.time() - start) / 60:.1f} min", flush=True)
+        if step % EVAL_EVERY == 0:
+            evaluate(step, time.time() - start)
+
+    if log["evals"][-1]["step"] != step:
+        evaluate(step, time.time() - start)
+    save_checkpoint(os.path.join(RUN_DIR, "model.pt"), model, tokenizer, step=step)
+    print(f"done: {step:,} steps, {(time.time() - start) / 60:.1f} minutes")
+
+
+if __name__ == "__main__":
+    main(float(sys.argv[1]) if len(sys.argv) > 1 else 10)

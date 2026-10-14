@@ -11,14 +11,14 @@ from checkpoint import load_checkpoint
 from model import pick_device
 
 
-def write(model, tokenizer, prompt, max_new_tokens=200, temperature=0.8, top_k=50):
+def write(model, tokenizer, prompt, max_new_tokens=200, temperature=0.8, top_k=50, with_prompt=True):
     was_training = model.training
     model.eval()
     device = next(model.parameters()).device
     ids = torch.tensor([tokenizer.encode(prompt)], device=device)
     out = model.generate(ids, max_new_tokens, temperature, top_k, eos_id=tokenizer.eot_id)
     model.train(was_training)
-    return tokenizer.decode(out[0].tolist())
+    return tokenizer.decode(out[0].tolist() if with_prompt else out[0, ids.size(1) :].tolist())
 
 
 def main():
