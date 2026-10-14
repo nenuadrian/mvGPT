@@ -38,12 +38,19 @@ python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 
 python summary.py
+python data.py
+python pretrain.py 10
+python sample.py checkpoints/pretrain/model.pt "Once upon a time"
 ```
 
 `summary.py` builds the model and prints it the way PyTorch sees it: the modules, the parameters
 by layer, the shape of the data after each layer, and a few tokens generated before any training.
+`data.py` downloads TinyStories and tokenizes it, `pretrain.py` trains the model for ten minutes, and
+`sample.py` writes stories with it.
 
 ## Pages
 
 - [Architecture](architecture.md): the transformer, layer by layer, with the data flow and where
   the parameters are.
+- [Pretraining](pretraining.md): the tokenizer, the data, next-token prediction and the training
+  loop, sampling, and how we measure a model.

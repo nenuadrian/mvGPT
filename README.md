@@ -15,7 +15,11 @@ training pipeline of a language model. The docs are at <https://nenuadrian.githu
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 
-python summary.py   # the model as PyTorch sees it: modules, parameters, shapes
+python summary.py      # the model as PyTorch sees it: modules, parameters, shapes
+python data.py         # download TinyStories, build the vocabulary, store the stories as token ids
+python pretrain.py 10  # pretrain for 10 minutes
+python sample.py checkpoints/pretrain/model.pt "Once upon a time"
+python evaluate.py checkpoints/pretrain/step-0.pt checkpoints/pretrain/model.pt
 ```
 
 ## Docs

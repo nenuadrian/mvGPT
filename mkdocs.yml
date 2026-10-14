@@ -68,3 +68,4 @@ extra_javascript:
 nav:
   - Home: index.md
   - Architecture: architecture.md
+  - Pretraining: pretraining.md
