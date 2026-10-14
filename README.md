@@ -1,0 +1,10 @@
+# mvGPT
+
+A minimum viable GPT: a small decoder-only transformer, written from scratch in PyTorch, that you
+can read from one end to the other. It has 14.6 million parameters and learns to write children's
+stories from [TinyStories](https://huggingface.co/datasets/roneneldan/TinyStories), in minutes on a
+laptop.
+
+It's the code of the YouTube series [Minimum Viable GPT](https://mvgpt.nenuadrian.com), which builds
+it on camera, one tagged step at a time (`ep001/step-1`, ...), and then takes it through the
+training pipeline of a language model.
