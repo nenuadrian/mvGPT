@@ -7,7 +7,7 @@ laptop.
 
 It's the code of the YouTube series [Minimum Viable GPT](https://mvgpt.nenuadrian.com), which builds
 it on camera, one tagged step at a time (`ep001/step-1`, ...), and then takes it through the
-training pipeline of a language model.
+training pipeline of a language model. The docs are at <https://nenuadrian.github.io/mvGPT/>.
 
 ## Run it
 
@@ -16,4 +16,11 @@ python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 
 python summary.py   # the model as PyTorch sees it: modules, parameters, shapes
+```
+
+## Docs
+
+```bash
+pip install -r requirements-docs.txt
+mkdocs serve        # http://127.0.0.1:8000
 ```
