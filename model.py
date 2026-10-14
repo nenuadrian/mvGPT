@@ -111,3 +111,19 @@ class GPT(nn.Module):
         if targets is not None:
             loss = F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1))
         return logits, loss
+
+    @torch.no_grad()
+    def generate(self, idx, max_new_tokens, temperature=1.0, top_k=None, eos_id=None):
+        for _ in range(max_new_tokens):
+            # The model has block_size positions, so it sees no more than the last 256 tokens.
+            logits, _ = self(idx[:, -self.config.block_size :])
+            logits = logits[:, -1, :] / temperature
+            if top_k is not None:
+                kth = torch.topk(logits, top_k).values[:, [-1]]
+                logits[logits < kth] = -float("inf")
+            probs = F.softmax(logits, dim=-1)
+            next_id = torch.multinomial(probs, num_samples=1)
+            idx = torch.cat([idx, next_id], dim=1)
+            if eos_id is not None and (next_id == eos_id).all():
+                break
+        return idx
