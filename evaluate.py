@@ -1,11 +1,12 @@
-"""Measures trained models on held-out stories, side by side.
+"""Measures trained models side by side: on held-out stories, and on following instructions.
 
-    python evaluate.py checkpoints/pretrain/step-0.pt checkpoints/pretrain/model.pt
+    python evaluate.py checkpoints/pretrain/model.pt checkpoints/sft/model.pt
 """
 import argparse
 import json
 import math
 import os
+import re
 
 import numpy as np
 import torch
@@ -14,8 +15,12 @@ from torch.nn import functional as F
 from checkpoint import load_checkpoint
 from data import DATA_DIR
 from model import pick_device
+from sft import build_examples, instruction, make_batch, parse
+from tokenizer import EOT
 
 PROMPT = "Once upon a time, there was a little"
+INSTRUCTIONS = 50
+MAX_TOKENS = 200
 
 
 @torch.no_grad()
@@ -46,6 +51,38 @@ def next_tokens(model, tokenizer, prompt, k=5):
     return {tokenizer.id_to_token[i]: p for p, i in zip(top.values.tolist(), top.indices.tolist())}
 
 
+def load_instructions(path, n):
+    with open(path, encoding="utf-8") as f:
+        docs = [parse(doc) for doc in f.read().split(EOT)]
+    # Instructions that ask for words, so we can check whether the story uses them.
+    asks = [fields for fields in docs if "Words" in fields and "Story" in fields][:n]
+    return [(instruction(fields), fields["Words"].split(", ")) for fields in asks]
+
+
+@torch.no_grad()
+def instruction_metrics(model, tokenizer, instructions, examples):
+    model.eval()
+    device = next(model.parameters()).device
+    used, stopped, lengths = 0, 0, []
+    for prompt, words in instructions:
+        ids = torch.tensor([tokenizer.encode(prompt)], device=device)
+        out = model.generate(ids, MAX_TOKENS, temperature=0.8, top_k=50, eos_id=tokenizer.eot_id)
+        story_ids = out[0, ids.size(1) :].tolist()
+        story = tokenizer.decode(story_ids)
+        # A word counts in its plural, or with -d, -ed or -ing: "play" in "played".
+        used += sum(bool(re.search(rf"\b{re.escape(w)}(s|es|d|ed|ing)?\b", story, re.I)) for w in words)
+        stopped += story_ids[-1] == tokenizer.eot_id
+        lengths.append(len(story_ids))
+    batches = range(0, len(examples), 25)
+    loss = sum(model(*make_batch(examples[i : i + 25], tokenizer.pad_id, device))[1].item() for i in batches)
+    return {
+        "instruction_loss": loss / len(batches),
+        "words_used": used / sum(len(words) for _, words in instructions),
+        "stopped": stopped / len(instructions),
+        "story_tokens": float(np.mean(lengths)),
+    }
+
+
 def name(path):
     # checkpoints/pretrain/model.pt is "pretrain", and checkpoints/pretrain/step-250.pt is "step-250".
     stem = os.path.splitext(os.path.basename(path))[0]
@@ -60,18 +97,23 @@ def main():
 
     device = pick_device()
     valid = np.memmap(os.path.join(DATA_DIR, "valid.bin"), dtype=np.uint16, mode="r")
+    instructions = load_instructions(os.path.join(DATA_DIR, "instruct_valid.txt"), INSTRUCTIONS)
     results, predictions = {}, {}
     for path in args.checkpoints:
         torch.manual_seed(1337)
         model, tokenizer, _ = load_checkpoint(path, device)
-        results[name(path)] = story_metrics(model, valid)
+        examples = build_examples(os.path.join(DATA_DIR, "instruct_valid.txt"), tokenizer,
+                                  model.config.block_size, limit=500)
+        results[name(path)] = {**story_metrics(model, valid),
+                               **instruction_metrics(model, tokenizer, instructions, examples)}
         predictions[name(path)] = next_tokens(model, tokenizer, PROMPT)
 
     names = list(results)
-    print(f"{'':<14}" + "".join(f"{n:>12}" for n in names))
+    print(f"{'':<18}" + "".join(f"{n:>12}" for n in names))
     for metric in results[names[0]]:
         cells = [results[n][metric] for n in names]
-        print(f"{metric:<14}" + "".join(f"{c:>12.1%}" if metric == "accuracy" else f"{c:>12.2f}" for c in cells))
+        percent = metric in ("accuracy", "words_used", "stopped")
+        print(f"{metric:<18}" + "".join(f"{c:>12.1%}" if percent else f"{c:>12.2f}" for c in cells))
     for n in names:
         print(f"\n{n}: {PROMPT} ...")
         for token, p in predictions[n].items():
