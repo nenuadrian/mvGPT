@@ -19,7 +19,9 @@ python summary.py      # the model as PyTorch sees it: modules, parameters, shap
 python data.py         # download TinyStories, build the vocabulary, store the stories as token ids
 python pretrain.py 10  # pretrain for 10 minutes
 python sample.py checkpoints/pretrain/model.pt "Once upon a time"
-python evaluate.py checkpoints/pretrain/step-0.pt checkpoints/pretrain/model.pt
+python sft.py 10       # fine-tune on instructions for 10 minutes
+python sample.py checkpoints/sft/model.pt "Words: dog, ball, happy. Story:"
+python evaluate.py checkpoints/pretrain/model.pt checkpoints/sft/model.pt
 ```
 
 ## Docs

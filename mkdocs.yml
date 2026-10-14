@@ -69,3 +69,4 @@ nav:
   - Home: index.md
   - Architecture: architecture.md
   - Pretraining: pretraining.md
+  - Supervised fine-tuning: sft.md

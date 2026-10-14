@@ -41,12 +41,14 @@ python summary.py
 python data.py
 python pretrain.py 10
 python sample.py checkpoints/pretrain/model.pt "Once upon a time"
+python sft.py 10
+python sample.py checkpoints/sft/model.pt "Words: dog, ball, happy. Story:"
 ```
 
 `summary.py` builds the model and prints it the way PyTorch sees it: the modules, the parameters
 by layer, the shape of the data after each layer, and a few tokens generated before any training.
 `data.py` downloads TinyStories and tokenizes it, `pretrain.py` trains the model for ten minutes, and
-`sample.py` writes stories with it.
+`sample.py` writes stories with it. `sft.py` then fine-tunes it to write the story an instruction asks for.
 
 ## Pages
 
@@ -54,3 +56,5 @@ by layer, the shape of the data after each layer, and a few tokens generated bef
   the parameters are.
 - [Pretraining](pretraining.md): the tokenizer, the data, next-token prediction and the training
   loop, sampling, and how we measure a model.
+- [Supervised fine-tuning](sft.md): instructions and stories, a loss on the story alone, and how
+  well the model follows instructions before and after.
