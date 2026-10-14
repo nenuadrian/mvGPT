@@ -1,6 +1,8 @@
 """mvGPT: a minimum viable GPT, a decoder-only transformer you can read end to end."""
+import math
 from dataclasses import dataclass
 
+import torch
 import torch.nn as nn
 from torch.nn import functional as F
 
@@ -38,3 +40,19 @@ class CausalSelfAttention(nn.Module):
         )
         y = y.transpose(1, 2).contiguous().view(B, T, C)
         return self.resid_dropout(self.o_proj(y))
+
+
+def gelu(x):
+    # x times the probability that a standard normal variable is at most x.
+    return 0.5 * x * (1.0 + torch.erf(x / math.sqrt(2.0)))
+
+
+class MLP(nn.Module):
+    def __init__(self, config):
+        super().__init__()
+        self.up_proj = nn.Linear(config.n_embd, 4 * config.n_embd, bias=config.bias)
+        self.down_proj = nn.Linear(4 * config.n_embd, config.n_embd, bias=config.bias)
+        self.dropout = nn.Dropout(config.dropout)
+
+    def forward(self, x):
+        return self.dropout(self.down_proj(gelu(self.up_proj(x))))
