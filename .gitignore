@@ -3,3 +3,5 @@ __pycache__/
 .venv/
 # The docs, built by mkdocs
 site/
+# Downloads and tokenized data: data.py makes them again
+data/
