@@ -117,7 +117,8 @@ class GPT(nn.Module):
         logits = self.lm_head(self.norm(x))
         loss = None
         if targets is not None:
-            loss = F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1))
+            # A target of -1 marks a position with nothing to learn, such as padding.
+            loss = F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1), ignore_index=-1)
         return logits, loss
 
     @torch.no_grad()

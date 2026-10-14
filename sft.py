@@ -4,7 +4,12 @@
 """
 import re
 
+import numpy as np
+import torch
+
 from tokenizer import EOT
+
+BATCH_SIZE = 48
 
 # The fields of an instruction, in the order our prompts give them, before the story.
 FIELDS = ["Features", "Words", "Random sentence", "Summary"]
@@ -37,3 +42,32 @@ def build_examples(path, tokenizer, block_size, limit=None):
         if len(ids) > len(prompt):
             examples.append((ids, len(prompt)))
     return examples
+
+
+def make_batch(examples, pad_id, device):
+    longest = max(len(ids) for ids, _ in examples)
+    x = np.full((len(examples), longest - 1), pad_id, dtype=np.int64)
+    y = np.full((len(examples), longest - 1), -1, dtype=np.int64)
+    for row, (ids, prompt_len) in enumerate(examples):
+        x[row, : len(ids) - 1] = ids[:-1]
+        # Only the story is learned: the last prompt position predicts its first token, and the
+        # instruction and the padding keep their -1, which the loss skips.
+        y[row, prompt_len - 1 : len(ids) - 1] = ids[prompt_len:]
+    return torch.from_numpy(x).to(device), torch.from_numpy(y).to(device)
+
+
+def random_batch(examples, pad_id, device):
+    picks = torch.randint(len(examples), (BATCH_SIZE,)).tolist()
+    return make_batch([examples[i] for i in picks], pad_id, device)
+
+
+@torch.no_grad()
+def estimate_loss(model, examples, pad_id, batches=20):
+    model.eval()
+    device = next(model.parameters()).device
+    total = 0.0
+    for _ in range(batches):
+        x, y = random_batch(examples, pad_id, device)
+        total += model(x, y)[1].item()
+    model.train()
+    return total / batches
