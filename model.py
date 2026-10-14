@@ -7,6 +7,14 @@ import torch.nn as nn
 from torch.nn import functional as F
 
 
+def pick_device():
+    if torch.cuda.is_available():
+        return "cuda"
+    if torch.backends.mps.is_available():  # Apple silicon
+        return "mps"
+    return "cpu"
+
+
 @dataclass
 class GPTConfig:
     vocab_size: int = 10_000
