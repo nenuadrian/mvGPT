@@ -70,3 +70,44 @@ class Block(nn.Module):
         x = x + self.attn(self.attn_norm(x))
         x = x + self.mlp(self.mlp_norm(x))
         return x
+
+
+class GPT(nn.Module):
+    def __init__(self, config):
+        super().__init__()
+        self.config = config
+        self.embed_tokens = nn.Embedding(config.vocab_size, config.n_embd)
+        self.embed_positions = nn.Embedding(config.block_size, config.n_embd)
+        self.drop = nn.Dropout(config.dropout)
+        self.blocks = nn.ModuleList([Block(config) for _ in range(config.n_layer)])
+        self.norm = nn.LayerNorm(config.n_embd, bias=config.bias)
+        self.lm_head = nn.Linear(config.n_embd, config.vocab_size, bias=False)
+        # Weight tying: the head scores tokens with the matrix that embeds them.
+        self.embed_tokens.weight = self.lm_head.weight
+        self._init_weights()
+
+    def _init_weights(self):
+        for name, module in self.named_modules():
+            if isinstance(module, (nn.Linear, nn.Embedding)):
+                std = 0.02
+                # These two add into the residual stream, twice per block, so they start smaller.
+                if name.endswith(("o_proj", "down_proj")):
+                    std /= math.sqrt(2 * self.config.n_layer)
+                nn.init.normal_(module.weight, mean=0.0, std=std)
+            if isinstance(module, nn.Linear) and module.bias is not None:
+                nn.init.zeros_(module.bias)
+
+    def num_params(self):
+        return sum(p.numel() for p in self.parameters())
+
+    def forward(self, idx, targets=None):
+        B, T = idx.shape
+        pos = torch.arange(T, device=idx.device)
+        x = self.drop(self.embed_tokens(idx) + self.embed_positions(pos))
+        for block in self.blocks:
+            x = block(x)
+        logits = self.lm_head(self.norm(x))
+        loss = None
+        if targets is not None:
+            loss = F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1))
+        return logits, loss
