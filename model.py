@@ -56,3 +56,17 @@ class MLP(nn.Module):
 
     def forward(self, x):
         return self.dropout(self.down_proj(gelu(self.up_proj(x))))
+
+
+class Block(nn.Module):
+    def __init__(self, config):
+        super().__init__()
+        self.attn_norm = nn.LayerNorm(config.n_embd, bias=config.bias)
+        self.attn = CausalSelfAttention(config)
+        self.mlp_norm = nn.LayerNorm(config.n_embd, bias=config.bias)
+        self.mlp = MLP(config)
+
+    def forward(self, x):
+        x = x + self.attn(self.attn_norm(x))
+        x = x + self.mlp(self.mlp_norm(x))
+        return x
