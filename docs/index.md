@@ -70,3 +70,5 @@ Both training runs log to TensorBoard, under `runs/`.
   and the GPU, and decisions in the code, measured.
 - [Preferences, with DPO](dpo.md): pairs of the model's stories, scored by the words they use, and
   direct preference optimisation, with what it gains and what it costs.
+- [Reinforcement learning, with PPO](ppo.md): the model writes, a reward scores it, and PPO's
+  clipped objective, with a critic and a KL penalty, improves it, next to DPO.
