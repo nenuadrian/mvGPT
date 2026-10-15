@@ -1,10 +1,12 @@
 import argparse
 import os
+from string import Template
 
 import numpy as np
 import onnxruntime
 import torch
 from onnxruntime.quantization import QuantType, quantize_dynamic
+from huggingface_hub import HfApi
 from optimum.exporters.onnx import main_export
 from tokenizers import Tokenizer, decoders, pre_tokenizers
 from tokenizers.models import WordPiece
@@ -100,10 +102,27 @@ def onnx_loss(path, ids, config):
     return F.cross_entropy(torch.from_numpy(logits), torch.tensor(ids[1:])).item()
 
 
+def push(folder, repo, tag, message):
+    with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "model_card.md"), encoding="utf-8") as f:
+        card = Template(f.read()).substitute(repo=repo, tag=tag, message=message)
+    # The README of a model repo is its model card, the page the Hub shows for it.
+    with open(os.path.join(folder, "README.md"), "w", encoding="utf-8") as f:
+        f.write(card)
+    api = HfApi()
+    api.create_repo(repo, exist_ok=True)
+    commit = api.upload_folder(repo_id=repo, folder_path=folder, commit_message=message)
+    # A tag names this commit, so revision=tag loads it, whatever is pushed after it.
+    api.create_tag(repo, tag=tag, revision=commit.oid, tag_message=message)
+    print(f"\npushed {commit.commit_url}\ntagged {tag}")
+
+
 def main():
     parser = argparse.ArgumentParser(description="Save a checkpoint in the Hugging Face format, as a GPT-2.")
     parser.add_argument("checkpoint")
     parser.add_argument("folder")
+    parser.add_argument("--push", metavar="REPO", help="a model repo on the Hugging Face Hub, such as nenuadrian/mvGPT")
+    parser.add_argument("--tag", help="the tag for this version, such as ep003-sft")
+    parser.add_argument("--message", help="what this version is, for the commit and the model card")
     args = parser.parse_args()
 
     model, tokenizer, _ = load_checkpoint(args.checkpoint)
@@ -120,6 +139,8 @@ def main():
     for name in ("model.onnx", "model_quantized.onnx"):
         path = os.path.join(args.folder, "onnx", name)
         print(f"{name:<22}{os.path.getsize(path) / 1e6:6.1f} MB  loss {onnx_loss(path, window, model.config):.4f}")
+    if args.push:
+        push(args.folder, args.push, args.tag, args.message)
 
 
 if __name__ == "__main__":
