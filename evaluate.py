@@ -1,7 +1,3 @@
-"""Measures trained models side by side: on held-out stories, and on following instructions.
-
-    python evaluate.py checkpoints/pretrain/model.pt checkpoints/sft/model.pt
-"""
 import argparse
 import json
 import math
@@ -90,7 +86,7 @@ def name(path):
 
 
 def main():
-    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser = argparse.ArgumentParser(description="Measure trained models side by side, on held-out stories and on following instructions.")
     parser.add_argument("checkpoints", nargs="+")
     parser.add_argument("--out", help="a folder to write the results to, as JSON")
     args = parser.parse_args()

@@ -1,4 +1,3 @@
-"""Downloads TinyStories, builds the vocabulary and stores the stories as token ids."""
 import os
 import urllib.request
 

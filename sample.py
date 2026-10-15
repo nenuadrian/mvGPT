@@ -1,7 +1,3 @@
-"""Writes stories with a trained model.
-
-    python sample.py checkpoints/pretrain/model.pt "Once upon a time"
-"""
 import argparse
 import textwrap
 
@@ -22,7 +18,7 @@ def write(model, tokenizer, prompt, max_new_tokens=200, temperature=0.8, top_k=5
 
 
 def main():
-    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser = argparse.ArgumentParser(description="Write stories with a trained model.")
     parser.add_argument("checkpoint")
     parser.add_argument("prompt", nargs="?", default="Once upon a time")
     parser.add_argument("-n", "--stories", type=int, default=2)

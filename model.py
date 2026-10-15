@@ -1,4 +1,3 @@
-"""mvGPT: a minimum viable GPT, a decoder-only transformer you can read end to end."""
 import math
 from dataclasses import dataclass
 

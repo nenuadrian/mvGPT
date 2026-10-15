@@ -1,4 +1,3 @@
-"""A trained model in one file: its weights, its config and its vocabulary."""
 import os
 from dataclasses import asdict
 

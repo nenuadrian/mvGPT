@@ -1,4 +1,3 @@
-"""A word-level tokenizer: each word, and each run of punctuation, is a token."""
 import re
 from collections import Counter
 

@@ -1,7 +1,3 @@
-"""Supervised fine-tuning: the pretrained model learns to write the story an instruction asks for.
-
-    python sft.py 10
-"""
 import json
 import os
 import re

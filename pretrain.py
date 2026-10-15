@@ -1,7 +1,3 @@
-"""Pretraining: the model learns to predict the next token of TinyStories, for a set number of minutes.
-
-    python pretrain.py 10
-"""
 import json
 import math
 import os

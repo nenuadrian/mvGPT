@@ -1,5 +1,3 @@
-"""Builds mvGPT and shows what PyTorch sees: its modules, its parameters, the shapes through a
-forward pass, and what it generates before any training."""
 import math
 
 import torch
