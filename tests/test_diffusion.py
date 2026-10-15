@@ -2,7 +2,7 @@ import math
 
 import torch
 
-from diffusion import add_noise, diffusion_loss
+from diffusion import add_noise, denoise, diffusion_loss
 from model import GPT, GPTConfig
 
 MASK = 49  # the last of 50 ids
@@ -42,3 +42,15 @@ def test_an_untrained_model_scores_about_ln_vocab():
     torch.manual_seed(0)
     loss = diffusion_loss(tiny(False), torch.randint(MASK, (256, 32)), MASK).item()
     assert abs(loss - math.log(50)) < 0.3
+
+
+def test_denoising_writes_every_mask_and_keeps_the_rest():
+    torch.manual_seed(0)
+    canvas = torch.full((3, 32), MASK)
+    canvas[:, :5] = torch.randint(MASK, (3, 5))
+    ladder = []
+    out = denoise(tiny(False), canvas, MASK, steps=9, ladder=ladder)
+    assert (out != MASK).all()
+    assert (out[:, :5] == canvas[:, :5]).all()
+    # 27 tokens in 9 steps: 3 at each.
+    assert [sum(t == MASK for t in row) for row in ladder] == list(range(24, -1, -3))

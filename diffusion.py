@@ -5,7 +5,9 @@ import textwrap
 import torch
 from torch.nn import functional as F
 
+from checkpoint import load_checkpoint
 from data import DATA_DIR, load_tokenizer
+from model import pick_device
 from tokenizer import EOT
 
 
@@ -45,6 +47,77 @@ def diffusion_loss(model, x, mask):
     return (nats.sum(1) / (rates * (T - 1))).mean()
 
 
+@torch.no_grad()
+def denoise(model, canvas, mask, steps, temperature=1.0, top_k=None, ladder=None):
+    # Writes each [MASK] in the canvas, some of them at each step, and leaves the other tokens as they are.
+    canvas = canvas.clone()
+    for step in range(steps):
+        hidden = canvas == mask
+        left = hidden.sum(1)
+        if left.sum() == 0:
+            break
+        logits, _ = model(canvas)
+        # Position i - 1's output predicts token i, so the first token can't be hidden. In float32, as
+        # on a GPU they can come in bfloat16.
+        logits = logits[:, :-1].float() / temperature
+        logits[..., mask] = -float("inf")  # the answer is never [MASK]
+        if top_k is not None:
+            kth = torch.topk(logits, top_k).values[..., [-1]]
+            logits[logits < kth] = -float("inf")
+        probs = F.softmax(logits, dim=-1)
+        # A guess for every position at once, and how likely the model found it.
+        guess = torch.multinomial(probs.flatten(0, 1), 1).view(probs.shape[:2])
+        sure = probs.gather(-1, guess[..., None])[..., 0]
+        guess, sure = F.pad(guess, (1, 0)), F.pad(sure, (1, 0))
+        sure[~hidden] = -1.0
+        # Of the hidden tokens, the surest guesses are kept: enough of them that the last step writes the
+        # rest. The others stay hidden, for a fresh guess next step, with more of the story around them.
+        keep = torch.ceil(left / (steps - step))
+        rank = sure.argsort(dim=1, descending=True).argsort(dim=1)
+        reveal = hidden & (rank < keep[:, None])
+        canvas[reveal] = guess[reveal]
+        if ladder is not None:
+            ladder.append(canvas[0].tolist())
+    return canvas
+
+
+def canvas_for(model, tokenizer, ids):
+    # A window of [MASK], the length the model trained on, with ids at its start.
+    device = next(model.parameters()).device
+    canvas = torch.full((1, model.config.block_size), mask_id(tokenizer), device=device)
+    canvas[0, : len(ids)] = torch.tensor(ids, device=device)
+    return canvas
+
+
+def first_story(tokenizer, ids, tokens=None):
+    # The canvas starts with end of text, as a story does in training, after the one before it. Its story
+    # runs to the next end of text, and what's after that is the start of another story.
+    end = ids.index(tokenizer.eot_id, 1) if tokenizer.eot_id in ids[1:] else len(ids)
+    if tokens is not None:
+        end = min(end, 1 + tokens)
+    return tokenizer.decode(ids[1:end])
+
+
+def write(model, tokenizer, prompt, steps=64, temperature=0.8, top_k=50, tokens=None, ladder=None):
+    # A story by denoising: end of text and the prompt, then [MASK] to the end of the window.
+    was_training = model.training
+    model.eval()
+    canvas = canvas_for(model, tokenizer, [tokenizer.eot_id] + tokenizer.encode(prompt))
+    out = denoise(model, canvas, mask_id(tokenizer), steps, temperature, top_k, ladder)
+    model.train(was_training)
+    return first_story(tokenizer, out[0].tolist(), tokens)
+
+
+def fill(model, tokenizer, before, after, gap, steps=64, temperature=0.8, top_k=50):
+    # Infilling: a story's beginning and its end, with `gap` tokens of [MASK] between them, and after its
+    # end, the rest of the window, as in training.
+    model.eval()
+    mask = mask_id(tokenizer)
+    ids = [tokenizer.eot_id] + tokenizer.encode(before) + [mask] * gap + tokenizer.encode(" " + after.strip())
+    out = denoise(model, canvas_for(model, tokenizer, ids + [tokenizer.eot_id]), mask, steps, temperature, top_k)
+    return first_story(tokenizer, out[0].tolist())
+
+
 def show(tokenizer, ids, mask):
     # The text, with a shaded block for each token that's still hidden.
     text, run = "", []
@@ -71,12 +144,49 @@ def masking(args):
         print(textwrap.fill(show(tokenizer, noisy[0].tolist(), mask), width=90), end="\n\n")
 
 
+def writing(args):
+    model, tokenizer, _ = load_checkpoint(args.checkpoint, pick_device())
+    mask = mask_id(tokenizer)
+    for _ in range(args.stories):
+        ladder = []
+        story = write(model, tokenizer, args.prompt, args.steps, args.temperature, args.top_k, ladder=ladder)
+        if args.ladder:
+            # The canvas along the way, as far as its first story goes once it's written.
+            final = ladder[-1]
+            end = final.index(tokenizer.eot_id, 1) if tokenizer.eot_id in final[1:] else len(final)
+            for step in args.ladder:
+                print(f"step {step}:")
+                print(textwrap.fill(show(tokenizer, ladder[step - 1][1:end], mask), width=90), end="\n\n")
+        else:
+            print(textwrap.fill(story, width=90), end="\n\n")
+
+
+def filling(args):
+    model, tokenizer, _ = load_checkpoint(args.checkpoint, pick_device())
+    for _ in range(args.stories):
+        story = fill(model, tokenizer, args.before, args.after, args.gap, args.steps, args.temperature, args.top_k)
+        print(textwrap.fill(story, width=90), end="\n\n")
+
+
 def main():
     parser = argparse.ArgumentParser(description="Masked diffusion: hide a story's tokens, and write stories by unhiding them.")
     commands = parser.add_subparsers(required=True)
     mask = commands.add_parser("mask", help="a held-out story with some of its tokens hidden")
     mask.add_argument("--rates", type=float, nargs="+", default=[0.1, 0.5, 0.9])
     mask.set_defaults(run=masking)
+    for name, run in (("write", writing), ("fill", filling)):
+        command = commands.add_parser(name)
+        command.add_argument("checkpoint")
+        command.add_argument("-n", "--stories", type=int, default=1)
+        command.add_argument("--steps", type=int, default=64, help="passes of the model, each unhiding some tokens")
+        command.add_argument("--temperature", type=float, default=0.8)
+        command.add_argument("--top-k", type=int, default=50)
+        command.set_defaults(run=run)
+    commands.choices["write"].add_argument("prompt", nargs="?", default="Once upon a time")
+    commands.choices["write"].add_argument("--ladder", type=int, nargs="+", help="show the canvas after these steps")
+    commands.choices["fill"].add_argument("before")
+    commands.choices["fill"].add_argument("after")
+    commands.choices["fill"].add_argument("--gap", type=int, default=40, help="tokens to write between them")
     for command in commands.choices.values():
         command.add_argument("--seed", type=int, default=0)
     args = parser.parse_args()
