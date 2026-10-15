@@ -55,6 +55,11 @@ def load_instructions(path, n):
     return [(instruction(fields), fields["Words"].split(", ")) for fields in asks]
 
 
+def words_used(story, words):
+    # A word counts in its plural, or with -d, -ed or -ing: "play" in "played".
+    return sum(bool(re.search(rf"\b{re.escape(w)}(s|es|d|ed|ing)?\b", story, re.I)) for w in words)
+
+
 @torch.no_grad()
 def instruction_metrics(model, tokenizer, instructions, examples):
     model.eval()
@@ -65,8 +70,7 @@ def instruction_metrics(model, tokenizer, instructions, examples):
         out = model.generate(ids, MAX_TOKENS, temperature=0.8, top_k=50, eos_id=tokenizer.eot_id)
         story_ids = out[0, ids.size(1) :].tolist()
         story = tokenizer.decode(story_ids)
-        # A word counts in its plural, or with -d, -ed or -ing: "play" in "played".
-        used += sum(bool(re.search(rf"\b{re.escape(w)}(s|es|d|ed|ing)?\b", story, re.I)) for w in words)
+        used += words_used(story, words)
         stopped += story_ids[-1] == tokenizer.eot_id
         lengths.append(len(story_ids))
     batches = range(0, len(examples), 25)
