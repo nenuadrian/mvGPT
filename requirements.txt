@@ -1,4 +1,5 @@
 accelerate>=1.15
+gradio>=6.17
 matplotlib>=3.9
 onnxruntime>=1.31
 optimum-onnx>=0.1
