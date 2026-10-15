@@ -79,3 +79,4 @@ nav:
   - LoRA: lora.md
   - Rotary position embeddings: rope.md
   - A BPE tokenizer, in C++: bpe.md
+  - Training on several GPUs: distributed.md
