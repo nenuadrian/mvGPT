@@ -1,4 +1,3 @@
-import json
 import math
 import os
 import sys
@@ -6,8 +5,9 @@ import time
 
 import numpy as np
 import torch
+from torch.utils.tensorboard import SummaryWriter
 
-from checkpoint import CHECKPOINTS, save_checkpoint
+from checkpoint import CHECKPOINTS, RUNS, save_checkpoint
 from data import DATA_DIR, load_tokenizer
 from model import GPT, GPTConfig, pick_device
 from sample import write
@@ -73,23 +73,25 @@ def main(minutes):
         betas=(0.9, 0.95),
     )
 
-    log = {"steps": [], "evals": []}
+    # The run's numbers go to TensorBoard, in a folder named after the run and when it started.
+    writer = SummaryWriter(os.path.join(RUNS, time.strftime("pretrain-%Y%m%d-%H%M%S")))
 
-    def evaluate(step, elapsed):
+    def evaluate(step):
         losses = estimate_loss(model, splits)
         story = write(model, tokenizer, "Once upon a time", max_new_tokens=40)
-        log["evals"].append({"step": step, "minutes": round(elapsed / 60, 2), "train": round(losses["train"], 4),
-                             "valid": round(losses["valid"], 4), "sample": story})
+        writer.add_scalar("loss/train", losses["train"], step)
+        writer.add_scalar("loss/valid", losses["valid"], step)
+        writer.add_text("sample", story, step)
+        # Written to disk now, so TensorBoard shows the evaluation while the run goes on.
+        writer.flush()
         print(f"step {step:>5} | train {losses['train']:.3f} | valid {losses['valid']:.3f} | {story}", flush=True)
         # A checkpoint at each evaluation, to compare the model as it learns.
         save_checkpoint(os.path.join(RUN_DIR, f"step-{step}.pt"), model, tokenizer, step=step)
-        with open(os.path.join(RUN_DIR, "log.json"), "w") as f:
-            json.dump(log, f, indent=1)
 
     budget = minutes * 60
     start = last = time.time()
     step = 0
-    evaluate(step, 0)
+    evaluate(step)
     while (elapsed := time.time() - start) < budget:
         lr = learning_rate(step, elapsed / budget)
         for group in optimizer.param_groups:
@@ -107,14 +109,17 @@ def main(minutes):
             now = time.time()
             speed = 50 * BATCH_SIZE * config.block_size / (now - last)
             last = now
-            log["steps"].append({"step": step, "loss": round(loss.item(), 4), "lr": lr, "tokens_per_s": round(speed)})
+            writer.add_scalar("loss/batch", loss.item(), step)
+            writer.add_scalar("lr", lr, step)
+            writer.add_scalar("tokens_per_s", speed, step)
             print(f"step {step:>5} | loss {loss.item():.3f} | lr {lr:.1e} | {speed:,.0f} tokens/s", flush=True)
         if step % EVAL_EVERY == 0:
-            evaluate(step, time.time() - start)
+            evaluate(step)
             last = time.time()
 
-    if log["evals"][-1]["step"] != step:
-        evaluate(step, time.time() - start)
+    if step % EVAL_EVERY != 0:
+        evaluate(step)
+    writer.close()
     save_checkpoint(os.path.join(RUN_DIR, "model.pt"), model, tokenizer, step=step)
     print(f"done: {step:,} steps, {step * BATCH_SIZE * config.block_size:,} tokens, "
           f"{(time.time() - start) / 60:.1f} minutes")

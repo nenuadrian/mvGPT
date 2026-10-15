@@ -1,4 +1,3 @@
-import json
 import os
 import re
 import sys
@@ -7,8 +6,9 @@ import time
 
 import numpy as np
 import torch
+from torch.utils.tensorboard import SummaryWriter
 
-from checkpoint import CHECKPOINTS, load_checkpoint, save_checkpoint
+from checkpoint import CHECKPOINTS, RUNS, load_checkpoint, save_checkpoint
 from data import DATA_DIR
 from model import pick_device
 from sample import write
@@ -102,24 +102,23 @@ def main(minutes):
         betas=(0.9, 0.95),
     )
 
-    log = {"steps": [], "evals": []}
+    writer = SummaryWriter(os.path.join(RUNS, time.strftime("sft-%Y%m%d-%H%M%S")))
 
-    def evaluate(step, elapsed):
+    def evaluate(step):
         losses = {"train": estimate_loss(model, train, tokenizer.pad_id),
                   "valid": estimate_loss(model, valid, tokenizer.pad_id)}
         story = write(model, tokenizer, DEMO, max_new_tokens=120, with_prompt=False)
-        log["evals"].append({"step": step, "minutes": round(elapsed / 60, 2), "train": round(losses["train"], 4),
-                             "valid": round(losses["valid"], 4), "sample": story})
+        writer.add_scalar("loss/train", losses["train"], step)
+        writer.add_scalar("loss/valid", losses["valid"], step)
+        writer.add_text("sample", story, step)
+        writer.flush()
         print(f"step {step:>5} | train {losses['train']:.3f} | valid {losses['valid']:.3f}", flush=True)
         print(textwrap.indent(textwrap.fill(story, width=86), "  "), flush=True)
-        os.makedirs(RUN_DIR, exist_ok=True)
-        with open(os.path.join(RUN_DIR, "log.json"), "w") as f:
-            json.dump(log, f, indent=1)
 
     budget = minutes * 60
     start = time.time()
     step = 0
-    evaluate(step, 0)
+    evaluate(step)
     while time.time() - start < budget:
         x, y = random_batch(train, tokenizer.pad_id, device)
         _, loss = model(x, y)
@@ -130,13 +129,14 @@ def main(minutes):
         step += 1
 
         if step % 50 == 0:
-            log["steps"].append({"step": step, "loss": round(loss.item(), 4)})
+            writer.add_scalar("loss/batch", loss.item(), step)
             print(f"step {step:>5} | loss {loss.item():.3f} | {(time.time() - start) / 60:.1f} min", flush=True)
         if step % EVAL_EVERY == 0:
-            evaluate(step, time.time() - start)
+            evaluate(step)
 
-    if log["evals"][-1]["step"] != step:
-        evaluate(step, time.time() - start)
+    if step % EVAL_EVERY != 0:
+        evaluate(step)
+    writer.close()
     save_checkpoint(os.path.join(RUN_DIR, "model.pt"), model, tokenizer, step=step)
     print(f"done: {step:,} steps, {(time.time() - start) / 60:.1f} minutes")
 

@@ -7,6 +7,8 @@ from model import GPT, GPTConfig
 from tokenizer import WordTokenizer
 
 CHECKPOINTS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "checkpoints")
+# Each training run logs to a folder of its own in here, for TensorBoard.
+RUNS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "runs")
 
 
 def save_checkpoint(path, model, tokenizer, **meta):

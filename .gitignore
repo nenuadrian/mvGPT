@@ -8,3 +8,5 @@ data/
 # Trained weights, and what evaluate.py measures
 checkpoints/
 results/
+# TensorBoard's logs of the training runs
+runs/
