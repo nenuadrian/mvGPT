@@ -1,5 +1,7 @@
-# The image needs the app and what it imports, and nothing else from the repo.
+# The images need the app, the server and what they import, and nothing else from the repo.
 *
 !app.py
+!server.py
 !tokenizer.py
 !requirements-app.txt
+!requirements-server.txt
