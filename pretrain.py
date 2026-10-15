@@ -9,6 +9,8 @@ from torch.utils.tensorboard import SummaryWriter
 
 from checkpoint import CHECKPOINTS, RUNS, save_checkpoint
 from data import DATA_DIR, load_tokenizer
+from diffusion import diffusion_loss, mask_id
+from diffusion import write as write_by_denoising
 from model import GPT, GPTConfig, pick_device
 from sample import write
 
@@ -27,8 +29,12 @@ def get_batch(data, block_size, batch_size, device):
     return x.to(device), y.to(device)
 
 
+def next_token_loss(model, x, y):
+    return model(x, y)[1]
+
+
 @torch.no_grad()
-def estimate_loss(model, splits, batches=20):
+def estimate_loss(model, splits, loss_of=next_token_loss, batches=20):
     model.eval()
     device = next(model.parameters()).device
     losses = {}
@@ -36,7 +42,7 @@ def estimate_loss(model, splits, batches=20):
         total = 0.0
         for _ in range(batches):
             x, y = get_batch(data, model.config.block_size, BATCH_SIZE, device)
-            total += model(x, y)[1].item()
+            total += loss_of(model, x, y).item()
         losses[name] = total / batches
     model.train()
     return losses
@@ -49,14 +55,21 @@ def learning_rate(step, progress):
     return MIN_LR + 0.5 * (LR - MIN_LR) * (1 + math.cos(math.pi * progress))
 
 
-def main(minutes, rope=False, bpe=False):
-    # Each kind of model gets a run folder of its own: pretrain, pretrain-rope, pretrain-rope-bpe.
-    run_dir = os.path.join(CHECKPOINTS, "pretrain" + ("-rope" if rope else "") + ("-bpe" if bpe else ""))
+def main(minutes, rope=False, bpe=False, diffusion=False):
+    # Each kind of model gets a run folder of its own: pretrain, pretrain-rope, pretrain-rope-bpe, ...
+    run_dir = os.path.join(CHECKPOINTS, "pretrain" + ("-rope" if rope else "") + ("-bpe" if bpe else "")
+                           + ("-diffusion" if diffusion else ""))
     torch.manual_seed(1337)
     device = pick_device()
     tokenizer = load_tokenizer(bpe)
-    config = GPTConfig(vocab_size=len(tokenizer), rope=rope)
+    # A diffusion model attends both ways, and has one more token, [MASK].
+    config = GPTConfig(vocab_size=len(tokenizer) + 1 if diffusion else len(tokenizer), rope=rope, causal=not diffusion)
     model = GPT(config).to(device)
+
+    def loss_of(model, x, y):
+        # Diffusion hides some of x's tokens and learns to fill them in; next-token prediction learns y.
+        return diffusion_loss(model, x, mask_id(tokenizer)) if diffusion else next_token_loss(model, x, y)
+
     splits = {
         split: np.memmap(os.path.join(DATA_DIR, f"{split}{'-bpe' if bpe else ''}.bin"), dtype=np.uint16, mode="r")
         for split in ("train", "valid")
@@ -78,8 +91,11 @@ def main(minutes, rope=False, bpe=False):
     writer = SummaryWriter(os.path.join(RUNS, time.strftime(f"{os.path.basename(run_dir)}-%Y%m%d-%H%M%S")))
 
     def evaluate(step):
-        losses = estimate_loss(model, splits)
-        story = write(model, tokenizer, "Once upon a time", max_new_tokens=40)
+        losses = estimate_loss(model, splits, loss_of)
+        if diffusion:
+            story = write_by_denoising(model, tokenizer, "Once upon a time", tokens=44)
+        else:
+            story = write(model, tokenizer, "Once upon a time", max_new_tokens=40)
         writer.add_scalar("loss/train", losses["train"], step)
         writer.add_scalar("loss/valid", losses["valid"], step)
         writer.add_text("sample", story, step)
@@ -98,7 +114,7 @@ def main(minutes, rope=False, bpe=False):
         for group in optimizer.param_groups:
             group["lr"] = lr
         x, y = get_batch(splits["train"], config.block_size, BATCH_SIZE, device)
-        _, loss = model(x, y)
+        loss = loss_of(model, x, y)
         optimizer.zero_grad(set_to_none=True)
         loss.backward()
         # A rare bad batch can't throw the weights off: the gradient's length is capped at 1.
@@ -127,4 +143,5 @@ def main(minutes, rope=False, bpe=False):
 
 
 if __name__ == "__main__":
-    main(float(sys.argv[1]) if len(sys.argv) > 1 else 10, rope="--rope" in sys.argv, bpe="--bpe" in sys.argv)
+    main(float(sys.argv[1]) if len(sys.argv) > 1 else 10, rope="--rope" in sys.argv, bpe="--bpe" in sys.argv,
+         diffusion="--diffusion" in sys.argv)
