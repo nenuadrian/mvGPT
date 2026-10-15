@@ -23,6 +23,7 @@ class GPTConfig:
     n_embd: int = 384  # split between the heads: 6 x 64
     dropout: float = 0.1
     bias: bool = True
+    rope: bool = False  # rotary position embeddings, instead of a learned embedding per position
 
 
 class KVCache:
@@ -30,9 +31,16 @@ class KVCache:
         # Per block: the keys and values of the tokens so far, each (B, heads, tokens, 64).
         self.keys = [None] * n_layer
         self.values = [None] * n_layer
+        # The position of the next token, which, once the cache slides, is past the tokens it keeps.
+        self.position = 0
 
     def __len__(self):
         return 0 if self.keys[0] is None else self.keys[0].size(2)
+
+    def slide(self, keep):
+        # Drop the oldest tokens' keys and values, keeping the last `keep`.
+        self.keys = [k[:, :, -keep:] for k in self.keys]
+        self.values = [v[:, :, -keep:] for v in self.values]
 
     def update(self, layer, k, v):
         if self.keys[layer] is not None:
@@ -40,6 +48,20 @@ class KVCache:
             v = torch.cat([self.values[layer], v], dim=2)
         self.keys[layer], self.values[layer] = k, v
         return k, v
+
+
+def rotary(start, T, head_size, device):
+    # The angles for positions start to start + T - 1, one per pair of channels, as cosines and sines:
+    # they turn faster for the first pairs and slower for the last ones.
+    speeds = 10_000 ** (-torch.arange(0, head_size, 2, device=device) / head_size)
+    angles = torch.arange(start, start + T, device=device)[:, None] * speeds
+    return angles.cos(), angles.sin()
+
+
+def rotate(x, cos, sin):
+    # Rotary position embedding: each pair of channels (i, i + 32) is turned by its position's angle.
+    x1, x2 = x[..., : x.size(-1) // 2], x[..., x.size(-1) // 2 :]
+    return torch.cat([x1 * cos - x2 * sin, x1 * sin + x2 * cos], dim=-1)
 
 
 class CausalSelfAttention(nn.Module):
@@ -54,11 +76,14 @@ class CausalSelfAttention(nn.Module):
         self.dropout_p = config.dropout
         self.resid_dropout = nn.Dropout(config.dropout)
 
-    def forward(self, x, cache=None):
+    def forward(self, x, cache=None, angles=None):
         B, T, C = x.shape  # batch, tokens, channels
         q = self.q_proj(x).view(B, T, self.n_head, C // self.n_head).transpose(1, 2)
         k = self.k_proj(x).view(B, T, self.n_head, C // self.n_head).transpose(1, 2)
         v = self.v_proj(x).view(B, T, self.n_head, C // self.n_head).transpose(1, 2)
+        if angles is not None:
+            # Rotated by their positions, a query and a key score by how far apart they are, not where.
+            q, k = rotate(q, *angles), rotate(k, *angles)
         if cache is not None:
             k, v = cache.update(self.layer, k, v)
         S = k.size(2)  # the tokens attended to: the cached ones and these T
@@ -96,8 +121,8 @@ class Block(nn.Module):
         self.mlp_norm = nn.LayerNorm(config.n_embd, bias=config.bias)
         self.mlp = MLP(config)
 
-    def forward(self, x, cache=None):
-        x = x + self.attn(self.attn_norm(x), cache)
+    def forward(self, x, cache=None, angles=None):
+        x = x + self.attn(self.attn_norm(x), cache, angles)
         x = x + self.mlp(self.mlp_norm(x))
         return x
 
@@ -107,7 +132,8 @@ class GPT(nn.Module):
         super().__init__()
         self.config = config
         self.embed_tokens = nn.Embedding(config.vocab_size, config.n_embd)
-        self.embed_positions = nn.Embedding(config.block_size, config.n_embd)
+        # With rotary embeddings, attention handles positions, and there's no table of them.
+        self.embed_positions = None if config.rope else nn.Embedding(config.block_size, config.n_embd)
         self.drop = nn.Dropout(config.dropout)
         self.blocks = nn.ModuleList([Block(config, layer) for layer in range(config.n_layer)])
         self.norm = nn.LayerNorm(config.n_embd, bias=config.bias)
@@ -133,11 +159,19 @@ class GPT(nn.Module):
     def forward(self, idx, targets=None, cache=None):
         B, T = idx.shape
         # With a cache, these tokens come after the ones in it, so their positions do too.
-        start = 0 if cache is None else len(cache)
-        pos = torch.arange(start, start + T, device=idx.device)
-        x = self.drop(self.embed_tokens(idx) + self.embed_positions(pos))
+        start = 0 if cache is None else cache.position
+        x = self.embed_tokens(idx)
+        angles = None
+        if self.config.rope:
+            # Computed once, for all the blocks.
+            angles = rotary(start, T, self.config.n_embd // self.config.n_head, idx.device)
+        else:
+            x = x + self.embed_positions(torch.arange(start, start + T, device=idx.device))
+        x = self.drop(x)
         for block in self.blocks:
-            x = block(x, cache)
+            x = block(x, cache, angles)
+        if cache is not None:
+            cache.position += T
         logits = self.lm_head(self.norm(x))
         loss = None
         if targets is not None:
@@ -148,16 +182,20 @@ class GPT(nn.Module):
     @torch.no_grad()
     def generate(self, idx, max_new_tokens, temperature=1.0, top_k=None, eos_id=None, use_cache=True):
         cache = None
+        window = self.config.block_size
         for _ in range(max_new_tokens):
             # Past block_size tokens, the window slides, which moves each token to a new position and
-            # changes its keys and values, so from there on we run the whole window again.
-            if not use_cache or idx.size(1) > self.config.block_size:
+            # changes its keys and values, so from there on we run the whole window again. With rotary
+            # embeddings, the cache can slide instead, as a key's rotation stays right as the window moves.
+            if not use_cache or (idx.size(1) > window and not self.config.rope):
                 # The model has block_size positions, so it sees no more than the last 256 tokens.
-                logits, _ = self(idx[:, -self.config.block_size :])
+                logits, _ = self(idx[:, -window:])
             elif cache is None:
                 cache = KVCache(self.config.n_layer)
-                logits, _ = self(idx, cache=cache)
+                logits, _ = self(idx[:, -window:], cache=cache)
             else:
+                if len(cache) == window:
+                    cache.slide(window - 1)
                 # The newest token alone: the cache has the keys and values of the ones before it.
                 logits, _ = self(idx[:, -1:], cache=cache)
             logits = logits[:, -1, :] / temperature
