@@ -78,3 +78,5 @@ Both training runs log to TensorBoard, under `runs/`.
   that slides past the window, and RoPE next to learned positions.
 - [Flash attention](flash-attention.md): attention without its table of scores, in PyTorch on the
   Mac, then as a Triton kernel on an NVIDIA GPU, forwards and backwards, next to PyTorch's own.
+- [Serving many at once](serving.md): the model as an OpenAI-style completions API, the requests
+  waiting written together as a batch, measured under a crowd of players, in Docker, and vLLM.

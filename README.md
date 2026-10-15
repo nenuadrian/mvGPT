@@ -37,6 +37,8 @@ python lora.py 10                # fine-tune on instructions with LoRA, 2% of th
 python pretrain.py 10 --rope     # pretrain with rotary position embeddings, to checkpoints/pretrain-rope
 python context.py checkpoints/pretrain/model.pt checkpoints/pretrain-rope/model.pt  # past the window
 python attention_bench.py --device cpu   # attention by hand and flash attention: time and memory, by length
+python server.py         # the model as an OpenAI-style completions API, at http://127.0.0.1:8000
+python load.py           # a crowd of players against the server: tokens a second, and how long they wait
 ```
 
 ## Docs

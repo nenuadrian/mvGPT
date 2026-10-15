@@ -81,3 +81,4 @@ nav:
   - A BPE tokenizer, in C++: bpe.md
   - Training on several GPUs: distributed.md
   - Flash attention: flash-attention.md
+  - Serving many at once: serving.md
