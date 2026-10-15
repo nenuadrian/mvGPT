@@ -30,6 +30,8 @@ python app.py              # write stories in a web app, at http://127.0.0.1:786
 python explore.py checkpoints/sft/model.pt --times     # the model as a graph, in Model Explorer
 python profiler.py checkpoints/sft/model.pt --device cpu   # where the time goes
 python decisions.py checkpoints/sft/model.pt --device cpu  # decisions in the code, measured
+python preferences.py 2000 200   # pairs of stories, the one that uses more of the words preferred
+python dpo.py 10                 # learn from the pairs with DPO for 10 minutes
 ```
 
 ## Docs

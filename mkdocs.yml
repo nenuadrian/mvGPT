@@ -74,3 +74,4 @@ nav:
   - The KV cache: kv-cache.md
   - Sharing and serving: deploy.md
   - Profiling: profiling.md
+  - Preferences, with DPO: dpo.md

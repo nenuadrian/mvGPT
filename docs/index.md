@@ -68,3 +68,5 @@ Both training runs log to TensorBoard, under `runs/`.
   episode, a Gradio app in Docker on a server, and the model in the browser with Transformers.js.
 - [Profiling](profiling.md): the model as a graph in Model Explorer, PyTorch's profiler on the CPU
   and the GPU, and decisions in the code, measured.
+- [Preferences, with DPO](dpo.md): pairs of the model's stories, scored by the words they use, and
+  direct preference optimisation, with what it gains and what it costs.
