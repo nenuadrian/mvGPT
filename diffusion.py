@@ -47,6 +47,16 @@ def diffusion_loss(model, x, mask):
     return (nats.sum(1) / (rates * (T - 1))).mean()
 
 
+def from_autoregressive(model, path):
+    # A diffusion model that starts from a next-token model's weights, as Dream 7B started from Qwen's:
+    # the same weights everywhere, with the new model's row for [MASK] added to the embedding.
+    state = torch.load(path, map_location="cpu")["model"]
+    own = model.state_dict()
+    for name in ("embed_tokens.weight", "lm_head.weight"):
+        state[name] = torch.cat([state[name], own[name][-1:].cpu()])
+    model.load_state_dict(state)
+
+
 @torch.no_grad()
 def denoise(model, canvas, mask, steps, temperature=1.0, top_k=None, ladder=None):
     # Writes each [MASK] in the canvas, some of them at each step, and leaves the other tokens as they are.

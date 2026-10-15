@@ -12,7 +12,7 @@ from torch.utils.tensorboard import SummaryWriter
 from attention import attention_by_hand
 from checkpoint import CHECKPOINTS, RUNS, save_checkpoint
 from data import DATA_DIR, load_tokenizer
-from diffusion import diffusion_loss, mask_id
+from diffusion import diffusion_loss, from_autoregressive, mask_id
 from diffusion import write as write_by_denoising
 from model import GPT, GPTConfig
 from pretrain import EVAL_EVERY, LR, estimate_loss, get_batch, learning_rate, next_token_loss
@@ -48,6 +48,7 @@ def main():
                         help="PyTorch's, ours written out (attention.py), or our flash attention kernel (flash.py)")
     parser.add_argument("--diffusion", action="store_true",
                         help="a diffusion model: attention both ways, trained to fill in hidden tokens (diffusion.py)")
+    parser.add_argument("--init", help="for --diffusion, start from this next-token model's weights")
     parser.add_argument("--name", default="pretrain-ddp")
     args = parser.parse_args()
 
@@ -60,6 +61,8 @@ def main():
                        n_layer=args.layers, n_head=args.heads, n_embd=args.embd, dropout=args.dropout, rope=True,
                        causal=not args.diffusion)
     raw = GPT(config).to(device)
+    if args.init:
+        from_autoregressive(raw, args.init)
 
     def loss_of(model, x, y):
         return diffusion_loss(model, x, mask_id(tokenizer)) if args.diffusion else next_token_loss(model, x, y)
@@ -79,7 +82,7 @@ def main():
               "valid": np.memmap(os.path.join(DATA_DIR, "valid-bpe.bin"), dtype=np.uint16, mode="r")}
     if main_rank:
         gpu = torch.cuda.get_device_name() if device.startswith("cuda") else "CPU"
-        kind = "diffusion" if args.diffusion else f"{args.attention} attention"
+        kind = "diffusion" + (f" from {args.init}" if args.init else "") if args.diffusion else f"{args.attention} attention"
         print(f"{raw.num_params():,} parameters, {world} x {gpu}, {len(splits['train']):,} training tokens, {kind}",
               flush=True)
 

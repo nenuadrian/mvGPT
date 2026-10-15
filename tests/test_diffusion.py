@@ -2,7 +2,7 @@ import math
 
 import torch
 
-from diffusion import add_noise, denoise, diffusion_loss
+from diffusion import add_noise, denoise, diffusion_loss, from_autoregressive
 from model import GPT, GPTConfig
 
 MASK = 49  # the last of 50 ids
@@ -54,3 +54,15 @@ def test_denoising_writes_every_mask_and_keeps_the_rest():
     assert (out[:, :5] == canvas[:, :5]).all()
     # 27 tokens in 9 steps: 3 at each.
     assert [sum(t == MASK for t in row) for row in ladder] == list(range(24, -1, -3))
+
+
+def test_converting_keeps_the_next_token_model_and_adds_a_row(tmp_path):
+    torch.manual_seed(0)
+    config = GPTConfig(vocab_size=MASK, block_size=32, n_layer=2, n_head=2, n_embd=32, rope=True)
+    autoregressive = GPT(config)
+    torch.save({"model": autoregressive.state_dict()}, tmp_path / "model.pt")
+    model = tiny(False)
+    from_autoregressive(model, tmp_path / "model.pt")
+    assert torch.equal(model.embed_tokens.weight[:MASK], autoregressive.embed_tokens.weight)
+    assert torch.equal(model.blocks[1].mlp.up_proj.weight, autoregressive.blocks[1].mlp.up_proj.weight)
+    assert model.lm_head.weight is model.embed_tokens.weight
