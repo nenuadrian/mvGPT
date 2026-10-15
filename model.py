@@ -146,10 +146,20 @@ class GPT(nn.Module):
         return logits, loss
 
     @torch.no_grad()
-    def generate(self, idx, max_new_tokens, temperature=1.0, top_k=None, eos_id=None):
+    def generate(self, idx, max_new_tokens, temperature=1.0, top_k=None, eos_id=None, use_cache=True):
+        cache = None
         for _ in range(max_new_tokens):
-            # The model has block_size positions, so it sees no more than the last 256 tokens.
-            logits, _ = self(idx[:, -self.config.block_size :])
+            # Past block_size tokens, the window slides, which moves each token to a new position and
+            # changes its keys and values, so from there on we run the whole window again.
+            if not use_cache or idx.size(1) > self.config.block_size:
+                # The model has block_size positions, so it sees no more than the last 256 tokens.
+                logits, _ = self(idx[:, -self.config.block_size :])
+            elif cache is None:
+                cache = KVCache(self.config.n_layer)
+                logits, _ = self(idx, cache=cache)
+            else:
+                # The newest token alone: the cache has the keys and values of the ones before it.
+                logits, _ = self(idx[:, -1:], cache=cache)
             logits = logits[:, -1, :] / temperature
             if top_k is not None:
                 kth = torch.topk(logits, top_k).values[:, [-1]]
