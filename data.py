@@ -2,6 +2,7 @@ import os
 import sys
 import time
 import urllib.request
+from multiprocessing import Pool
 
 import numpy as np
 
@@ -20,9 +21,9 @@ DOWNLOADS = {
 MAX_BYTES = 80 * 2**20  # the first 80 MB of each file is plenty for a model this size
 
 
-def download(url, path):
+def download(url, path, max_bytes=MAX_BYTES):
     with urllib.request.urlopen(url) as response:
-        raw = response.read(MAX_BYTES)
+        raw = response.read(max_bytes)
     text = raw.decode("utf-8", errors="ignore")
     text = text[: text.rfind(EOT) + len(EOT)]
     with open(path, "w", encoding="utf-8") as f:
@@ -69,8 +70,50 @@ def build_bpe():
     return tokenizer
 
 
+def encode_part(text):
+    return np.array(_tokenizer.encode(text.decode("utf-8")), dtype=np.uint16)
+
+
+def start_worker():
+    global _tokenizer
+    _tokenizer = load_tokenizer(bpe=True)
+
+
+def build_full():
+    # All of TinyStories' training stories, 2.2 GB, for GPUs that can read them, with the merges learned on
+    # the first 80 MB: the same tokens, and the same held-out stories, as the models trained on a laptop.
+    tokenizer = load_tokenizer(bpe=True)
+    valid = os.path.join(DATA_DIR, "valid.txt")
+    if not os.path.exists(valid):
+        download(DOWNLOADS["valid.txt"], valid)
+    encode(tokenizer, valid, os.path.join(DATA_DIR, "valid-bpe.bin"))
+    path = os.path.join(DATA_DIR, "train-full.txt")
+    if not os.path.exists(path):
+        download(DOWNLOADS["train.txt"], path, max_bytes=None)
+    with open(path, "rb") as f:
+        text = f.read()
+    # Pieces of about 32 MB, each ending after a story, so they encode as the whole file would, a piece per core.
+    end_of_text = EOT.encode()
+    bounds = [0]
+    while bounds[-1] < len(text):
+        i = text.find(end_of_text, bounds[-1] + 32 * 2**20)
+        bounds.append(len(text) if i < 0 else i + len(end_of_text))
+    start = time.time()
+    tokens = 0
+    with Pool(os.cpu_count(), initializer=start_worker) as pool, \
+            open(os.path.join(DATA_DIR, "train-full-bpe.bin"), "wb") as out:
+        for ids in pool.imap(encode_part, (text[a:b] for a, b in zip(bounds, bounds[1:]))):
+            ids.tofile(out)
+            tokens += len(ids)
+    print(f"train-full-bpe.bin {tokens:>14,} tokens {len(text) / tokens:5.2f} bytes per token "
+          f"{time.time() - start:6.1f}s on {os.cpu_count()} cores")
+
+
 def main():
     os.makedirs(DATA_DIR, exist_ok=True)
+    if "--full" in sys.argv:
+        build_full()
+        return
     for name, url in DOWNLOADS.items():
         path = os.path.join(DATA_DIR, name)
         if not os.path.exists(path):
