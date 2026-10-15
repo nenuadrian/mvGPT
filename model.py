@@ -25,10 +25,28 @@ class GPTConfig:
     bias: bool = True
 
 
+class KVCache:
+    def __init__(self, n_layer):
+        # Per block: the keys and values of the tokens so far, each (B, heads, tokens, 64).
+        self.keys = [None] * n_layer
+        self.values = [None] * n_layer
+
+    def __len__(self):
+        return 0 if self.keys[0] is None else self.keys[0].size(2)
+
+    def update(self, layer, k, v):
+        if self.keys[layer] is not None:
+            k = torch.cat([self.keys[layer], k], dim=2)
+            v = torch.cat([self.values[layer], v], dim=2)
+        self.keys[layer], self.values[layer] = k, v
+        return k, v
+
+
 class CausalSelfAttention(nn.Module):
-    def __init__(self, config):
+    def __init__(self, config, layer):
         super().__init__()
         self.n_head = config.n_head
+        self.layer = layer
         self.q_proj = nn.Linear(config.n_embd, config.n_embd, bias=config.bias)
         self.k_proj = nn.Linear(config.n_embd, config.n_embd, bias=config.bias)
         self.v_proj = nn.Linear(config.n_embd, config.n_embd, bias=config.bias)
@@ -36,14 +54,19 @@ class CausalSelfAttention(nn.Module):
         self.dropout_p = config.dropout
         self.resid_dropout = nn.Dropout(config.dropout)
 
-    def forward(self, x):
+    def forward(self, x, cache=None):
         B, T, C = x.shape  # batch, tokens, channels
         q = self.q_proj(x).view(B, T, self.n_head, C // self.n_head).transpose(1, 2)
         k = self.k_proj(x).view(B, T, self.n_head, C // self.n_head).transpose(1, 2)
         v = self.v_proj(x).view(B, T, self.n_head, C // self.n_head).transpose(1, 2)
+        if cache is not None:
+            k, v = cache.update(self.layer, k, v)
+        S = k.size(2)  # the tokens attended to: the cached ones and these T
+        # Query i is token S - T + i, which sees the keys up to its own. A single new token sees all S.
+        mask = None if T in (1, S) else torch.ones(T, S, dtype=torch.bool, device=x.device).tril(S - T)
         # softmax(q k^T / sqrt(64)) v, where each token sees itself and the tokens before it.
         y = F.scaled_dot_product_attention(
-            q, k, v, dropout_p=self.dropout_p if self.training else 0.0, is_causal=True
+            q, k, v, attn_mask=mask, dropout_p=self.dropout_p if self.training else 0.0, is_causal=S == T
         )
         y = y.transpose(1, 2).contiguous().view(B, T, C)
         return self.resid_dropout(self.o_proj(y))
@@ -66,15 +89,15 @@ class MLP(nn.Module):
 
 
 class Block(nn.Module):
-    def __init__(self, config):
+    def __init__(self, config, layer):
         super().__init__()
         self.attn_norm = nn.LayerNorm(config.n_embd, bias=config.bias)
-        self.attn = CausalSelfAttention(config)
+        self.attn = CausalSelfAttention(config, layer)
         self.mlp_norm = nn.LayerNorm(config.n_embd, bias=config.bias)
         self.mlp = MLP(config)
 
-    def forward(self, x):
-        x = x + self.attn(self.attn_norm(x))
+    def forward(self, x, cache=None):
+        x = x + self.attn(self.attn_norm(x), cache)
         x = x + self.mlp(self.mlp_norm(x))
         return x
 
@@ -86,7 +109,7 @@ class GPT(nn.Module):
         self.embed_tokens = nn.Embedding(config.vocab_size, config.n_embd)
         self.embed_positions = nn.Embedding(config.block_size, config.n_embd)
         self.drop = nn.Dropout(config.dropout)
-        self.blocks = nn.ModuleList([Block(config) for _ in range(config.n_layer)])
+        self.blocks = nn.ModuleList([Block(config, layer) for layer in range(config.n_layer)])
         self.norm = nn.LayerNorm(config.n_embd, bias=config.bias)
         self.lm_head = nn.Linear(config.n_embd, config.vocab_size, bias=False)
         # Weight tying: the head scores tokens with the matrix that embeds them.
@@ -107,12 +130,14 @@ class GPT(nn.Module):
     def num_params(self):
         return sum(p.numel() for p in self.parameters())
 
-    def forward(self, idx, targets=None):
+    def forward(self, idx, targets=None, cache=None):
         B, T = idx.shape
-        pos = torch.arange(T, device=idx.device)
+        # With a cache, these tokens come after the ones in it, so their positions do too.
+        start = 0 if cache is None else len(cache)
+        pos = torch.arange(start, start + T, device=idx.device)
         x = self.drop(self.embed_tokens(idx) + self.embed_positions(pos))
         for block in self.blocks:
-            x = block(x)
+            x = block(x, cache)
         logits = self.lm_head(self.norm(x))
         loss = None
         if targets is not None:
