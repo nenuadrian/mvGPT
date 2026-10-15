@@ -76,3 +76,5 @@ Both training runs log to TensorBoard, under `runs/`.
   it learns, next to full fine-tuning.
 - [Rotary position embeddings](rope.md): positions as rotations of the queries and keys, a cache
   that slides past the window, and RoPE next to learned positions.
+- [Flash attention](flash-attention.md): attention without its table of scores, in PyTorch on the
+  Mac, then as a Triton kernel on an NVIDIA GPU, forwards and backwards, next to PyTorch's own.
