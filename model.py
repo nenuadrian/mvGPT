@@ -24,6 +24,7 @@ class GPTConfig:
     dropout: float = 0.1
     bias: bool = True
     rope: bool = False  # rotary position embeddings, instead of a learned embedding per position
+    causal: bool = True  # each token sees the ones before it; for diffusion (diffusion.py), all of them
 
 
 class KVCache:
@@ -69,6 +70,7 @@ class CausalSelfAttention(nn.Module):
         super().__init__()
         self.n_head = config.n_head
         self.layer = layer
+        self.causal = config.causal
         self.q_proj = nn.Linear(config.n_embd, config.n_embd, bias=config.bias)
         self.k_proj = nn.Linear(config.n_embd, config.n_embd, bias=config.bias)
         self.v_proj = nn.Linear(config.n_embd, config.n_embd, bias=config.bias)
@@ -92,11 +94,13 @@ class CausalSelfAttention(nn.Module):
         # Query i is token S - T + i, which sees the keys up to its own. A single new token sees all S.
         mask = None if T in (1, S) else torch.ones(T, S, dtype=torch.bool, device=x.device).tril(S - T)
         dropout_p = self.dropout_p if self.training else 0.0
-        if self.attend is not None and S == T and dropout_p == 0.0:
+        if self.attend is not None and self.causal and S == T and dropout_p == 0.0:
             y = self.attend(q, k, v)
         else:
-            # softmax(q k^T / sqrt(64)) v, where each token sees itself and the tokens before it.
-            y = F.scaled_dot_product_attention(q, k, v, attn_mask=mask, dropout_p=dropout_p, is_causal=S == T)
+            # softmax(q k^T / sqrt(64)) v, where each token sees itself and the tokens before it, or, when
+            # the model isn't causal, every token in the sequence, before it and after.
+            y = F.scaled_dot_product_attention(q, k, v, attn_mask=mask, dropout_p=dropout_p,
+                                               is_causal=self.causal and S == T)
         y = y.transpose(1, 2).contiguous().view(B, T, C)
         return self.resid_dropout(self.o_proj(y))
 
