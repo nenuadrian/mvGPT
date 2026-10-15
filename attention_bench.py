@@ -21,6 +21,10 @@ def pytorch(q, k, v):
 
 
 METHODS = {"by-hand": attention_by_hand, "pytorch": pytorch, "flash-pytorch": flash_attention_pytorch}
+if torch.cuda.is_available():
+    from flash import flash_attention
+
+    METHODS["triton"] = flash_attention
 DTYPES = {"float32": torch.float32, "bfloat16": torch.bfloat16, "float16": torch.float16}
 
 
