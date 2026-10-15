@@ -12,3 +12,6 @@ results/
 runs/
 # Models saved in the Hugging Face format, by hub.py
 hf/
+# The C++ tokenizer, built by setup.py
+build/
+*.so
