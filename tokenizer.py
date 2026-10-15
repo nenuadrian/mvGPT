@@ -62,3 +62,47 @@ class WordTokenizer:
         if skip_special:
             tokens = [t for t in tokens if t not in SPECIALS]
         return detokenize(tokens)
+
+
+BPE_SPECIALS_SPLIT = re.compile("(" + re.escape(PAD) + "|" + re.escape(EOT) + ")")
+
+
+class BPETokenizer:
+    def __init__(self, merges):
+        import bpe  # the C++ module: python setup.py build_ext --inplace
+
+        self.merges = [tuple(m) for m in merges]
+        self.encoder = bpe.Encoder(self.merges)
+        # Each token's bytes: the 256 single bytes, then, for each merge, its pair's bytes joined.
+        self.token_bytes = [bytes([b]) for b in range(256)]
+        for a, b in self.merges:
+            self.token_bytes.append(self.token_bytes[a] + self.token_bytes[b])
+        self.pad_id = len(self.token_bytes)
+        self.eot_id = self.pad_id + 1
+        # Any text is bytes, and each byte is a token, so there's no unknown token.
+        self.unk_id = None
+        self.id_to_token = [t.decode("utf-8", errors="replace") for t in self.token_bytes] + [PAD, EOT]
+
+    def __len__(self):
+        return len(self.id_to_token)
+
+    def encode(self, text):
+        ids = []
+        for piece in BPE_SPECIALS_SPLIT.split(text):
+            if piece == PAD:
+                ids.append(self.pad_id)
+            elif piece == EOT:
+                ids.append(self.eot_id)
+            elif piece:
+                ids.extend(self.encoder.encode(piece.encode("utf-8")))
+        return ids
+
+    def decode(self, ids, skip_special=True):
+        pieces = []
+        for i in ids:
+            if i < len(self.token_bytes):
+                pieces.append(self.token_bytes[i])
+            elif not skip_special:
+                pieces.append(self.id_to_token[i].encode("utf-8"))
+        # A token can end in the middle of a character, so the joined bytes are decoded at the end.
+        return b"".join(pieces).decode("utf-8", errors="replace")
