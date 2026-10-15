@@ -76,3 +76,4 @@ nav:
   - Profiling: profiling.md
   - Preferences, with DPO: dpo.md
   - Reinforcement learning, with PPO: ppo.md
+  - LoRA: lora.md

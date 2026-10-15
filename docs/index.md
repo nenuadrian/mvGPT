@@ -72,3 +72,5 @@ Both training runs log to TensorBoard, under `runs/`.
   direct preference optimisation, with what it gains and what it costs.
 - [Reinforcement learning, with PPO](ppo.md): the model writes, a reward scores it, and PPO's
   clipped objective, with a critic and a KL penalty, improves it, next to DPO.
+- [LoRA](lora.md): fine-tuning a low-rank update beside frozen weights, with what it saves and what
+  it learns, next to full fine-tuning.
