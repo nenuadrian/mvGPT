@@ -49,16 +49,16 @@ def learning_rate(step, progress):
     return MIN_LR + 0.5 * (LR - MIN_LR) * (1 + math.cos(math.pi * progress))
 
 
-def main(minutes, rope=False):
-    # Each kind of position embedding gets a run folder of its own.
-    run_dir = os.path.join(CHECKPOINTS, "pretrain-rope" if rope else "pretrain")
+def main(minutes, rope=False, bpe=False):
+    # Each kind of model gets a run folder of its own: pretrain, pretrain-rope, pretrain-rope-bpe.
+    run_dir = os.path.join(CHECKPOINTS, "pretrain" + ("-rope" if rope else "") + ("-bpe" if bpe else ""))
     torch.manual_seed(1337)
     device = pick_device()
-    tokenizer = load_tokenizer()
+    tokenizer = load_tokenizer(bpe)
     config = GPTConfig(vocab_size=len(tokenizer), rope=rope)
     model = GPT(config).to(device)
     splits = {
-        split: np.memmap(os.path.join(DATA_DIR, f"{split}.bin"), dtype=np.uint16, mode="r")
+        split: np.memmap(os.path.join(DATA_DIR, f"{split}{'-bpe' if bpe else ''}.bin"), dtype=np.uint16, mode="r")
         for split in ("train", "valid")
     }
     print(f"{model.num_params():,} parameters on {device}, {len(splits['train']):,} training tokens")
@@ -127,4 +127,4 @@ def main(minutes, rope=False):
 
 
 if __name__ == "__main__":
-    main(float(sys.argv[1]) if len(sys.argv) > 1 else 10, rope="--rope" in sys.argv)
+    main(float(sys.argv[1]) if len(sys.argv) > 1 else 10, rope="--rope" in sys.argv, bpe="--bpe" in sys.argv)
