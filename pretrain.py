@@ -12,7 +12,6 @@ from data import DATA_DIR, load_tokenizer
 from model import GPT, GPTConfig, pick_device
 from sample import write
 
-RUN_DIR = os.path.join(CHECKPOINTS, "pretrain")
 BATCH_SIZE = 48
 LR = 6e-4
 MIN_LR = LR / 10
@@ -50,11 +49,13 @@ def learning_rate(step, progress):
     return MIN_LR + 0.5 * (LR - MIN_LR) * (1 + math.cos(math.pi * progress))
 
 
-def main(minutes):
+def main(minutes, rope=False):
+    # Each kind of position embedding gets a run folder of its own.
+    run_dir = os.path.join(CHECKPOINTS, "pretrain-rope" if rope else "pretrain")
     torch.manual_seed(1337)
     device = pick_device()
     tokenizer = load_tokenizer()
-    config = GPTConfig(vocab_size=len(tokenizer))
+    config = GPTConfig(vocab_size=len(tokenizer), rope=rope)
     model = GPT(config).to(device)
     splits = {
         split: np.memmap(os.path.join(DATA_DIR, f"{split}.bin"), dtype=np.uint16, mode="r")
@@ -74,7 +75,7 @@ def main(minutes):
     )
 
     # The run's numbers go to TensorBoard, in a folder named after the run and when it started.
-    writer = SummaryWriter(os.path.join(RUNS, time.strftime("pretrain-%Y%m%d-%H%M%S")))
+    writer = SummaryWriter(os.path.join(RUNS, time.strftime(f"{os.path.basename(run_dir)}-%Y%m%d-%H%M%S")))
 
     def evaluate(step):
         losses = estimate_loss(model, splits)
@@ -86,7 +87,7 @@ def main(minutes):
         writer.flush()
         print(f"step {step:>5} | train {losses['train']:.3f} | valid {losses['valid']:.3f} | {story}", flush=True)
         # A checkpoint at each evaluation, to compare the model as it learns.
-        save_checkpoint(os.path.join(RUN_DIR, f"step-{step}.pt"), model, tokenizer, step=step)
+        save_checkpoint(os.path.join(run_dir, f"step-{step}.pt"), model, tokenizer, step=step)
 
     budget = minutes * 60
     start = last = time.time()
@@ -120,10 +121,10 @@ def main(minutes):
     if step % EVAL_EVERY != 0:
         evaluate(step)
     writer.close()
-    save_checkpoint(os.path.join(RUN_DIR, "model.pt"), model, tokenizer, step=step)
+    save_checkpoint(os.path.join(run_dir, "model.pt"), model, tokenizer, step=step)
     print(f"done: {step:,} steps, {step * BATCH_SIZE * config.block_size:,} tokens, "
           f"{(time.time() - start) / 60:.1f} minutes")
 
 
 if __name__ == "__main__":
-    main(float(sys.argv[1]) if len(sys.argv) > 1 else 10)
+    main(float(sys.argv[1]) if len(sys.argv) > 1 else 10, rope="--rope" in sys.argv)
