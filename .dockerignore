@@ -1,0 +1,5 @@
+# The image needs the app and what it imports, and nothing else from the repo.
+*
+!app.py
+!tokenizer.py
+!requirements-app.txt
