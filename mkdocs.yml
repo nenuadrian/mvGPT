@@ -70,3 +70,4 @@ nav:
   - Architecture: architecture.md
   - Pretraining: pretraining.md
   - Supervised fine-tuning: sft.md
+  - Watching training: tracking.md

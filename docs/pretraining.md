@@ -71,7 +71,8 @@ minutes rather than a number of steps, so it fits whatever machine it runs on:
 | Gradient clipping | norm 1.0 | a rare bad batch can't throw the weights off |
 | Evaluation | every 250 steps | loss on 20 batches of training and validation data, a sample, a checkpoint |
 
-`log.json` keeps the loss and learning rate every 50 steps and each evaluation, with its sample.
+The run logs the loss, the learning rate and the speed every 50 steps, and each evaluation with its
+sample, to TensorBoard: see [Watching training](tracking.md).
 
 ## What to expect
 

@@ -43,12 +43,14 @@ python pretrain.py 10
 python sample.py checkpoints/pretrain/model.pt "Once upon a time"
 python sft.py 10
 python sample.py checkpoints/sft/model.pt "Words: dog, ball, happy. Story:"
+tensorboard --logdir runs
 ```
 
 `summary.py` builds the model and prints it the way PyTorch sees it: the modules, the parameters
 by layer, the shape of the data after each layer, and a few tokens generated before any training.
 `data.py` downloads TinyStories and tokenizes it, `pretrain.py` trains the model for ten minutes, and
 `sample.py` writes stories with it. `sft.py` then fine-tunes it to write the story an instruction asks for.
+Both training runs log to TensorBoard, under `runs/`.
 
 ## Pages
 
@@ -58,3 +60,5 @@ by layer, the shape of the data after each layer, and a few tokens generated bef
   loop, sampling, and how we measure a model.
 - [Supervised fine-tuning](sft.md): instructions and stories, a loss on the story alone, and how
   well the model follows instructions before and after.
+- [Watching training](tracking.md): the runs in TensorBoard, and reading their logs in Python to
+  plot them with matplotlib.

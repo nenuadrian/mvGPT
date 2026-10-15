@@ -22,6 +22,8 @@ python sample.py checkpoints/pretrain/model.pt "Once upon a time"
 python sft.py 10       # fine-tune on instructions for 10 minutes
 python sample.py checkpoints/sft/model.pt "Words: dog, ball, happy. Story:"
 python evaluate.py checkpoints/pretrain/model.pt checkpoints/sft/model.pt
+tensorboard --logdir runs  # the training runs, at http://localhost:6006
+python plot.py runs/*      # read the runs' logs and plot them to results/
 ```
 
 ## Docs
