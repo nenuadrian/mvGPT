@@ -66,3 +66,5 @@ Both training runs log to TensorBoard, under `runs/`.
   through the model on its own, and how much faster it writes on a CPU and a GPU.
 - [Sharing and serving](deploy.md): the model on the Hugging Face Hub as a GPT-2, a version per
   episode, a Gradio app in Docker on a server, and the model in the browser with Transformers.js.
+- [Profiling](profiling.md): the model as a graph in Model Explorer, PyTorch's profiler on the CPU
+  and the GPU, and decisions in the code, measured.

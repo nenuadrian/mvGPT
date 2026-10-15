@@ -27,6 +27,9 @@ python plot.py runs/*      # read the runs' logs and plot them to results/
 python bench.py checkpoints/sft/model.pt --device cpu  # check the KV cache and time it
 python hub.py checkpoints/sft/model.pt hf/sft  # save it as a GPT-2 for transformers, and as ONNX
 python app.py              # write stories in a web app, at http://127.0.0.1:7860
+python explore.py checkpoints/sft/model.pt --times     # the model as a graph, in Model Explorer
+python profiler.py checkpoints/sft/model.pt --device cpu   # where the time goes
+python decisions.py checkpoints/sft/model.pt --device cpu  # decisions in the code, measured
 ```
 
 ## Docs
