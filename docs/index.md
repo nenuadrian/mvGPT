@@ -64,3 +64,5 @@ Both training runs log to TensorBoard, under `runs/`.
   plot them with matplotlib.
 - [The KV cache](kv-cache.md): keeping the keys and values of earlier tokens, so each new token runs
   through the model on its own, and how much faster it writes on a CPU and a GPU.
+- [Sharing and serving](deploy.md): the model on the Hugging Face Hub as a GPT-2, a version per
+  episode, a Gradio app in Docker on a server, and the model in the browser with Transformers.js.

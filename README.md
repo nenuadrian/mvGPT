@@ -25,6 +25,8 @@ python evaluate.py checkpoints/pretrain/model.pt checkpoints/sft/model.pt
 tensorboard --logdir runs  # the training runs, at http://localhost:6006
 python plot.py runs/*      # read the runs' logs and plot them to results/
 python bench.py checkpoints/sft/model.pt --device cpu  # check the KV cache and time it
+python hub.py checkpoints/sft/model.pt hf/sft  # save it as a GPT-2 for transformers, and as ONNX
+python app.py              # write stories in a web app, at http://127.0.0.1:7860
 ```
 
 ## Docs
