@@ -1,9 +1,14 @@
 import argparse
 import os
 
+import numpy as np
+import onnxruntime
 import torch
+from onnxruntime.quantization import QuantType, quantize_dynamic
+from optimum.exporters.onnx import main_export
 from tokenizers import Tokenizer, decoders, pre_tokenizers
 from tokenizers.models import WordPiece
+from torch.nn import functional as F
 from transformers import AutoModelForCausalLM, AutoTokenizer, GPT2Config, GPT2LMHeadModel, PreTrainedTokenizerFast
 
 from checkpoint import load_checkpoint
@@ -68,6 +73,31 @@ def check(model, tokenizer, folder):
     x = torch.tensor([ids[: model.config.block_size]])
     difference = (model(x)[0] - hf_model(x).logits).abs().max().item()
     print(f"largest difference in the logits: {difference:.1e}")
+    return ids
+
+
+def export_onnx(folder):
+    onnx_dir = os.path.join(folder, "onnx")
+    # With past: the model takes the cached keys and values as inputs, and returns them with the new ones.
+    main_export(folder, onnx_dir, task="text-generation-with-past")
+    for name in os.listdir(onnx_dir):
+        if not name.endswith(".onnx"):
+            os.remove(os.path.join(onnx_dir, name))  # copies of the configs, which stay at the top
+    # The weights as 8-bit integers, a quarter of the size, for a browser to download.
+    quantize_dynamic(os.path.join(onnx_dir, "model.onnx"), os.path.join(onnx_dir, "model_quantized.onnx"),
+                     weight_type=QuantType.QUInt8)
+
+
+def onnx_loss(path, ids, config):
+    session = onnxruntime.InferenceSession(path)
+    x = np.array([ids[:-1]])
+    feeds = {"input_ids": x, "attention_mask": np.ones_like(x), "position_ids": np.arange(x.shape[1])[None]}
+    for layer in range(config.n_layer):
+        for kind in ("key", "value"):
+            # An empty cache, as there are no tokens before these.
+            feeds[f"past_key_values.{layer}.{kind}"] = np.zeros((1, config.n_head, 0, config.n_embd // config.n_head), np.float32)
+    logits = session.run(["logits"], feeds)[0][0]
+    return F.cross_entropy(torch.from_numpy(logits), torch.tensor(ids[1:])).item()
 
 
 def main():
@@ -81,7 +111,15 @@ def main():
     to_gpt2(model, tokenizer).save_pretrained(args.folder)
     to_hf_tokenizer(tokenizer).save_pretrained(args.folder)
     print(f"saved {args.folder}: {', '.join(sorted(os.listdir(args.folder)))}")
-    check(model, tokenizer, args.folder)
+    ids = check(model, tokenizer, args.folder)
+
+    export_onnx(args.folder)
+    window = ids[: model.config.block_size + 1]
+    loss = model(torch.tensor([window[:-1]]), torch.tensor([window[1:]]))[1].item()
+    print(f"\n{'PyTorch':<22}{'':>9}  loss {loss:.4f}")
+    for name in ("model.onnx", "model_quantized.onnx"):
+        path = os.path.join(args.folder, "onnx", name)
+        print(f"{name:<22}{os.path.getsize(path) / 1e6:6.1f} MB  loss {onnx_loss(path, window, model.config):.4f}")
 
 
 if __name__ == "__main__":

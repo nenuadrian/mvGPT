@@ -1,4 +1,7 @@
+accelerate>=1.15
 matplotlib>=3.9
+onnxruntime>=1.31
+optimum-onnx>=0.1
 tensorboard>=2.18
 torch>=2.5
 transformers>=4.57
