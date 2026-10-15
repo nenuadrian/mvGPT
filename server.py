@@ -31,26 +31,54 @@ class Request:
 
 
 @torch.no_grad()
-def write(model, r, eos_id):
-    x, past = torch.tensor([r.ids]), None
-    for _ in range(r.max_tokens):
-        out = model(x, past_key_values=past, use_cache=True)
+def write(model, batch, pad_id, eos_id):
+    # Left padding: every prompt ends in the last column, so each row's next token goes after it.
+    width = max(len(r.ids) for r in batch)
+    x = torch.tensor([[pad_id] * (width - len(r.ids)) + r.ids for r in batch])
+    # 1 for a token, 0 for padding, which attention leaves out.
+    mask = torch.tensor([[0] * (width - len(r.ids)) + [1] * len(r.ids) for r in batch])
+    temperature = torch.tensor([[r.temperature] for r in batch])
+    top_k = torch.tensor([[r.top_k] for r in batch])
+    past, writing = None, list(batch)
+    for _ in range(max(r.max_tokens for r in batch)):
+        # A row's positions count its own tokens, not the padding in front of them.
+        positions = (mask.cumsum(1) - 1).clamp(min=0)[:, -x.size(1):]
+        out = model(x, attention_mask=mask, position_ids=positions, past_key_values=past, use_cache=True)
         past = out.past_key_values
-        logits = out.logits[0, -1] / r.temperature
-        logits[logits < torch.topk(logits, r.top_k).values[-1]] = -float("inf")
-        x = torch.multinomial(torch.softmax(logits, dim=-1), 1)[None]
-        if x.item() == eos_id:
-            r.finish_reason = "stop"
+        logits = out.logits[:, -1] / temperature
+        # Each row keeps its own top k: its k-th largest logit, among the largest k of the batch.
+        kth = torch.topk(logits, int(top_k.max())).values.gather(1, top_k - 1)
+        logits[logits < kth] = -float("inf")
+        x = torch.multinomial(torch.softmax(logits, dim=-1), 1)
+        mask = torch.cat([mask, torch.ones_like(x)], dim=1)
+        for r, token in zip(batch, x[:, 0].tolist()):
+            if r not in writing:
+                continue  # finished: its row still runs with the others, and what it writes is dropped
+            if token == eos_id:
+                r.finish_reason = "stop"
+                writing.remove(r)
+            else:
+                r.tokens.append(token)
+                if len(r.tokens) == r.max_tokens:
+                    writing.remove(r)
+        if not writing:
             return
-        r.tokens.append(x.item())
 
 
-def serve(model, tokenizer, requests):
-    # The model's thread: one request at a time, in the order they came.
+def serve(model, tokenizer, requests, max_batch, wait):
+    # The model's thread: it takes the first request, gives others `wait` seconds to join it, up to
+    # max_batch, and writes them together. Without the wait, the first of a crowd would go alone.
     while True:
-        r = requests.get()
-        write(model, r, tokenizer.eos_token_id)
-        r.done.set()
+        batch = [requests.get()]
+        deadline = time.monotonic() + wait
+        while len(batch) < max_batch:
+            try:
+                batch.append(requests.get(timeout=max(0.0, deadline - time.monotonic())))
+            except queue.Empty:
+                break
+        write(model, batch, tokenizer.pad_token_id, tokenizer.eos_token_id)
+        for r in batch:
+            r.done.set()
 
 
 def decode(tokenizer, ids):
@@ -111,17 +139,19 @@ def handler(tokenizer, context, requests):
 def main():
     parser = argparse.ArgumentParser(description="Serve the model from the Hub as an OpenAI-style completions API.")
     parser.add_argument("--port", type=int, default=8000)
+    parser.add_argument("--batch", type=int, default=16, help="the most requests written at once")
+    parser.add_argument("--wait", type=float, default=5, help="how long a batch waits to fill, in milliseconds")
     args = parser.parse_args()
 
     tokenizer = AutoTokenizer.from_pretrained(REPO, revision=REVISION)
     model = AutoModelForCausalLM.from_pretrained(REPO, revision=REVISION).eval()
     # Requests wait here for the model, which runs on a thread of its own.
     requests = queue.Queue()
-    threading.Thread(target=serve, args=(model, tokenizer, requests), daemon=True).start()
+    threading.Thread(target=serve, args=(model, tokenizer, requests, args.batch, args.wait / 1000), daemon=True).start()
     # In Docker, the server has to listen on all interfaces for a published port to reach it.
     host = os.environ.get("HOST", "127.0.0.1")
     server = Server((host, args.port), handler(tokenizer, model.config.max_position_embeddings, requests))
-    print(f"serving {REPO}@{REVISION} on http://{host}:{args.port}", flush=True)
+    print(f"serving {REPO}@{REVISION} on http://{host}:{args.port}, up to {args.batch} requests at once", flush=True)
     server.serve_forever()
 
 
