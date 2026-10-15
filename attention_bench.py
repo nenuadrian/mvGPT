@@ -12,7 +12,7 @@ from torch.autograd import DeviceType
 from torch.nn import functional as F
 from torch.profiler import ProfilerActivity, profile
 
-from attention import attention_by_hand
+from attention import attention_by_hand, flash_attention_pytorch
 from bench import sync
 
 
@@ -20,7 +20,7 @@ def pytorch(q, k, v):
     return F.scaled_dot_product_attention(q, k, v, is_causal=True)
 
 
-METHODS = {"by-hand": attention_by_hand, "pytorch": pytorch}
+METHODS = {"by-hand": attention_by_hand, "pytorch": pytorch, "flash-pytorch": flash_attention_pytorch}
 DTYPES = {"float32": torch.float32, "bfloat16": torch.bfloat16, "float16": torch.float16}
 
 
