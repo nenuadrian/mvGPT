@@ -71,3 +71,4 @@ nav:
   - Pretraining: pretraining.md
   - Supervised fine-tuning: sft.md
   - Watching training: tracking.md
+  - The KV cache: kv-cache.md

@@ -62,3 +62,5 @@ Both training runs log to TensorBoard, under `runs/`.
   well the model follows instructions before and after.
 - [Watching training](tracking.md): the runs in TensorBoard, and reading their logs in Python to
   plot them with matplotlib.
+- [The KV cache](kv-cache.md): keeping the keys and values of earlier tokens, so each new token runs
+  through the model on its own, and how much faster it writes on a CPU and a GPU.

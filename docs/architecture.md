@@ -115,7 +115,8 @@ $$
 The 384 channels are split into 6 heads of 64, which attend independently and are merged back with
 `o_proj`. The attention is causal: a token sees itself and the tokens before it, never the ones after,
 which is what lets the model generate from left to right. PyTorch's
-`F.scaled_dot_product_attention` computes it, with `is_causal=True` for the mask.
+`F.scaled_dot_product_attention` computes it, with `is_causal=True` for the mask, or a mask of its
+own when a [KV cache](kv-cache.md) holds the keys and values of earlier tokens.
 
 ### MLP and GELU
 
@@ -149,5 +150,6 @@ projections that add into the residual stream, `o_proj` and `down_proj`, start s
 
 `generate` runs the model on the tokens so far, divides the last position's scores by a temperature,
 optionally keeps the top k of them, samples a token from their softmax and appends it. It stops after
-`max_new_tokens`, or when it samples the end-of-text token. It runs the whole context through the
-model for each new token, which is simple, and slower than it needs to be.
+`max_new_tokens`, or when it samples the end-of-text token. It runs the prompt through the model
+once, and then each new token on its own, with a [KV cache](kv-cache.md) of the keys and values of
+the tokens before it.

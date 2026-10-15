@@ -24,6 +24,7 @@ python sample.py checkpoints/sft/model.pt "Words: dog, ball, happy. Story:"
 python evaluate.py checkpoints/pretrain/model.pt checkpoints/sft/model.pt
 tensorboard --logdir runs  # the training runs, at http://localhost:6006
 python plot.py runs/*      # read the runs' logs and plot them to results/
+python bench.py checkpoints/sft/model.pt --device cpu  # check the KV cache and time it
 ```
 
 ## Docs
