@@ -34,6 +34,8 @@ python preferences.py 2000 200   # pairs of stories, the one that uses more of t
 python dpo.py 10                 # learn from the pairs with DPO for 10 minutes
 python ppo.py 10 0.05            # reinforcement learning with PPO, a KL weight of 0.05, for 10 minutes
 python lora.py 10                # fine-tune on instructions with LoRA, 2% of the weights, for 10 minutes
+python pretrain.py 10 --rope     # pretrain with rotary position embeddings, to checkpoints/pretrain-rope
+python context.py checkpoints/pretrain/model.pt checkpoints/pretrain-rope/model.pt  # past the window
 ```
 
 ## Docs

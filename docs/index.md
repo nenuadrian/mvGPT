@@ -74,3 +74,5 @@ Both training runs log to TensorBoard, under `runs/`.
   clipped objective, with a critic and a KL penalty, improves it, next to DPO.
 - [LoRA](lora.md): fine-tuning a low-rank update beside frozen weights, with what it saves and what
   it learns, next to full fine-tuning.
+- [Rotary position embeddings](rope.md): positions as rotations of the queries and keys, a cache
+  that slides past the window, and RoPE next to learned positions.

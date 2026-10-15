@@ -77,3 +77,4 @@ nav:
   - Preferences, with DPO: dpo.md
   - Reinforcement learning, with PPO: ppo.md
   - LoRA: lora.md
+  - Rotary position embeddings: rope.md
