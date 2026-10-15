@@ -75,6 +75,8 @@ class CausalSelfAttention(nn.Module):
         self.o_proj = nn.Linear(config.n_embd, config.n_embd, bias=config.bias)
         self.dropout_p = config.dropout
         self.resid_dropout = nn.Dropout(config.dropout)
+        # Another function for causal attention over whole sequences, such as flash.py's kernel (GPT.attend_with).
+        self.attend = None
 
     def forward(self, x, cache=None, angles=None):
         B, T, C = x.shape  # batch, tokens, channels
@@ -89,10 +91,12 @@ class CausalSelfAttention(nn.Module):
         S = k.size(2)  # the tokens attended to: the cached ones and these T
         # Query i is token S - T + i, which sees the keys up to its own. A single new token sees all S.
         mask = None if T in (1, S) else torch.ones(T, S, dtype=torch.bool, device=x.device).tril(S - T)
-        # softmax(q k^T / sqrt(64)) v, where each token sees itself and the tokens before it.
-        y = F.scaled_dot_product_attention(
-            q, k, v, attn_mask=mask, dropout_p=self.dropout_p if self.training else 0.0, is_causal=S == T
-        )
+        dropout_p = self.dropout_p if self.training else 0.0
+        if self.attend is not None and S == T and dropout_p == 0.0:
+            y = self.attend(q, k, v)
+        else:
+            # softmax(q k^T / sqrt(64)) v, where each token sees itself and the tokens before it.
+            y = F.scaled_dot_product_attention(q, k, v, attn_mask=mask, dropout_p=dropout_p, is_causal=S == T)
         y = y.transpose(1, 2).contiguous().view(B, T, C)
         return self.resid_dropout(self.o_proj(y))
 
@@ -155,6 +159,12 @@ class GPT(nn.Module):
 
     def num_params(self):
         return sum(p.numel() for p in self.parameters())
+
+    def attend_with(self, attend):
+        # attend(q, k, v), causal, in place of PyTorch's attention where it can: whole sequences, no
+        # dropout. None goes back to PyTorch's.
+        for block in self.blocks:
+            block.attn.attend = attend
 
     def forward(self, idx, targets=None, cache=None):
         B, T = idx.shape

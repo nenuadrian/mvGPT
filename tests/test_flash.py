@@ -16,7 +16,14 @@ pytestmark = pytest.mark.skipif(DEVICE is None, reason="no NVIDIA GPU, and not T
 
 def qkv(T, dtype):
     torch.manual_seed(0)
-    return [torch.randn(2, 3, T, 64, device=DEVICE, dtype=dtype) for _ in range(3)]
+    shape = (2, 3, T, 64)
+    return [torch.randn(shape, device=DEVICE, dtype=dtype, requires_grad=True) for _ in range(4)]
+
+
+def attend(fn, q, k, v, grad):
+    # The output, and the gradients of q, k and v for this gradient of it.
+    out = fn(q, k, v)
+    return [out] + list(torch.autograd.grad(out, (q, k, v), grad))
 
 
 def pytorch(q, k, v):
@@ -28,8 +35,11 @@ def pytorch(q, k, v):
 def test_matches_pytorch(T, dtype):
     # Against PyTorch's attention in float64, ours may be off by rounding, but by no more than twice as
     # much as PyTorch's own attention is in the same precision: the test FlashAttention's authors use.
-    q, k, v = qkv(T, dtype)
-    exact = pytorch(q.double(), k.double(), v.double())
-    their_error = (pytorch(q, k, v).double() - exact).abs().max().item()
-    our_error = (flash_attention(q, k, v).double() - exact).abs().max().item()
-    assert our_error <= 2 * their_error + 1e-5, f"{our_error:.2e} against PyTorch's {their_error:.2e}"
+    q, k, v, grad = qkv(T, dtype)
+    exact = attend(pytorch, *(x.detach().double().requires_grad_() for x in (q, k, v)), grad.double())
+    theirs = attend(pytorch, q, k, v, grad)
+    ours = attend(flash_attention, q, k, v, grad)
+    for name, e, t, o in zip(["output", "dq", "dk", "dv"], exact, theirs, ours):
+        their_error = (t.double() - e).abs().max().item()
+        our_error = (o.double() - e).abs().max().item()
+        assert our_error <= 2 * their_error + 1e-5, f"{name}: {our_error:.2e} against PyTorch's {their_error:.2e}"

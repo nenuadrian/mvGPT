@@ -9,6 +9,7 @@ import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.tensorboard import SummaryWriter
 
+from attention import attention_by_hand
 from checkpoint import CHECKPOINTS, RUNS, save_checkpoint
 from data import DATA_DIR, load_tokenizer
 from model import GPT, GPTConfig
@@ -41,6 +42,8 @@ def main():
     parser.add_argument("--dropout", type=float, default=0.0)
     parser.add_argument("--full", action="store_true", help="all of TinyStories: python data.py --full")
     parser.add_argument("--compile", action="store_true")
+    parser.add_argument("--attention", default="pytorch", choices=["pytorch", "by-hand", "triton"],
+                        help="PyTorch's, ours written out (attention.py), or our flash attention kernel (flash.py)")
     parser.add_argument("--name", default="pretrain-ddp")
     args = parser.parse_args()
 
@@ -52,6 +55,12 @@ def main():
     config = GPTConfig(vocab_size=len(tokenizer), block_size=args.block, n_layer=args.layers, n_head=args.heads,
                        n_embd=args.embd, dropout=args.dropout, rope=True)
     raw = GPT(config).to(device)
+    if args.attention == "by-hand":
+        raw.attend_with(attention_by_hand)
+    elif args.attention == "triton":
+        from flash import flash_attention  # Triton runs on Linux, with NVIDIA GPUs
+
+        raw.attend_with(flash_attention)
     # DDP gives all ranks rank 0's starting weights, and averages the gradients across them after each backward.
     model = DDP(torch.compile(raw) if args.compile else raw,
                 device_ids=[int(device.split(":")[1])] if device.startswith("cuda") else None)
@@ -61,7 +70,8 @@ def main():
               "valid": np.memmap(os.path.join(DATA_DIR, "valid-bpe.bin"), dtype=np.uint16, mode="r")}
     if main_rank:
         gpu = torch.cuda.get_device_name() if device.startswith("cuda") else "CPU"
-        print(f"{raw.num_params():,} parameters, {world} x {gpu}, {len(splits['train']):,} training tokens", flush=True)
+        print(f"{raw.num_params():,} parameters, {world} x {gpu}, {len(splits['train']):,} training tokens, "
+              f"{args.attention} attention", flush=True)
 
     params = list(model.parameters())
     optimizer = torch.optim.AdamW(
