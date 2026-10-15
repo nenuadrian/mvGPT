@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>mvGPT in your browser</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;600&family=JetBrains+Mono&display=swap">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<main>
+  <h1>mvGPT</h1>
+  <p class="lede">A 15-million-parameter GPT that writes children's stories, running in your browser with
+    Transformers.js. The model downloads once, about 15 MB, when you first ask for a story.</p>
+  <form id="form">
+    <fieldset id="features"><legend>Features</legend></fieldset>
+    <label>Words <input type="text" name="words" placeholder="dog, ball, happy"></label>
+    <label>Summary <input type="text" name="summary" placeholder="A dog makes a new friend at the park."></label>
+    <button>Write a story</button>
+    <span id="status"></span>
+  </form>
+  <p id="story"></p>
+</main>
+<script type="module">
+  import { pipeline, TextStreamer } from "https://cdn.jsdelivr.net/npm/@huggingface/transformers@4.3.1";
+
+  const MODEL = "nenuadrian/mvGPT";
+  const FEATURES = ["Dialogue", "BadEnding", "MoralValue", "Twist", "Foreshadowing", "Conflict"];
+  const form = document.getElementById("form");
+  const status = document.getElementById("status");
+  const story = document.getElementById("story");
+  for (const name of FEATURES) {
+    form.features.insertAdjacentHTML("beforeend", `<label class="feature"><input type="checkbox" value="${name}"> ${name}</label>`);
+  }
+
+  // Our tokenizer's detokenize, in JavaScript: punctuation goes against the word before it.
+  function detokenize(tokens) {
+    return tokens.join(" ")
+      .replace(/ ([.,!?;:]\S*)/g, "$1")
+      .replace(/(\w) ' (\w)/g, "$1'$2")
+      .replace(/(^|\s)" /g, '$1"');
+  }
+
+  // The fields in the order sft.py gives them, ending where the story starts.
+  function instruction() {
+    const features = [...form.features.querySelectorAll("input:checked")].map((box) => box.value);
+    const lines = features.length ? [`Features: ${features.join(", ")}`] : [];
+    if (form.words.value.trim()) lines.push(`Words: ${form.words.value.trim()}`);
+    if (form.summary.value.trim()) lines.push(`Summary: ${form.summary.value.trim()}`);
+    return [...lines, "Story:"].join("\n");
+  }
+
+  let writer = null;  // made on the first story, so opening the page downloads nothing
+
+  async function load() {
+    writer = await pipeline("text-generation", MODEL, {
+      revision: "ep003-sft",
+      dtype: "q8",  // onnx/model_quantized.onnx
+      progress_callback: (p) => {
+        if (p.status === "progress" && p.file.endsWith(".onnx")) status.textContent = `downloading the model: ${Math.round(p.progress)}%`;
+      },
+    });
+  }
+
+  async function write() {
+    if (!writer) await load();
+    const tokens = [];
+    const streamer = new TextStreamer(writer.tokenizer, {
+      skip_prompt: true,
+      callback_function: () => {},
+      // Each new token, decoded on its own, and the story so far joined with detokenize.
+      token_callback_function: (ids) => {
+        tokens.push(writer.tokenizer.decode(ids, { skip_special_tokens: true }));
+        story.textContent = detokenize(tokens.filter(Boolean));
+      },
+    });
+    const prompt = instruction();
+    // The model has 256 positions, for the instruction and the story together.
+    const max_new_tokens = Math.min(200, 256 - writer.tokenizer.encode(prompt).length);
+    const start = performance.now();
+    await writer(prompt, { max_new_tokens, do_sample: true, temperature: 0.8, top_k: 50, streamer });
+    status.textContent = `${tokens.length} tokens in ${((performance.now() - start) / 1000).toFixed(1)} s, in this tab`;
+  }
+
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    form.querySelector("button").disabled = true;
+    try {
+      await write();
+    } catch (error) {
+      status.textContent = error.message;
+    }
+    form.querySelector("button").disabled = false;
+  });
+</script>
+</body>
+</html>

@@ -1,0 +1,17 @@
+/* The series' look: a near-black slate, Space Grotesk, and a periwinkle to mint title. */
+:root { --slate: #101215; --panel: #191d22; --line: #2a3038; --text: #e6e9ef; --dim: #8b93a3; --peri: #9fb4ff; --mint: #a8e6ed; }
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--slate); color: var(--text); font: 17px/1.6 "Space Grotesk", system-ui, sans-serif; }
+main { max-width: 760px; margin: 0 auto; padding: 48px 16px; }
+h1 { display: inline-block; margin: 0; font-size: 44px; background: linear-gradient(90deg, var(--peri), #fff, var(--mint)); -webkit-background-clip: text; background-clip: text; color: transparent; }
+p.lede { color: var(--dim); margin: 8px 0 28px; }
+form { display: grid; gap: 14px; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 20px; }
+fieldset { border: 0; padding: 0; margin: 0; display: flex; flex-wrap: wrap; gap: 8px 16px; }
+legend, label { color: var(--dim); font-size: 14px; }
+label.feature { color: var(--text); font-size: 15px; }
+input[type=checkbox] { accent-color: var(--peri); }
+input[type=text] { width: 100%; margin-top: 4px; padding: 10px 12px; border-radius: 8px; border: 1px solid var(--line); background: var(--slate); color: var(--text); font: inherit; }
+button { justify-self: start; padding: 10px 20px; border: 0; border-radius: 8px; background: var(--peri); color: var(--slate); font: 600 16px "Space Grotesk", sans-serif; cursor: pointer; }
+button:disabled { opacity: 0.5; cursor: default; }
+#status { color: var(--dim); font: 13px "JetBrains Mono", monospace; }
+#story { white-space: pre-wrap; min-height: 8em; margin-top: 24px; }
