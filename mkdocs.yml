@@ -84,3 +84,4 @@ nav:
   - Serving many at once: serving.md
   - Text diffusion: diffusion.md
   - Reinforcement learning, with GRPO: grpo.md
+  - A modern transformer block: modern-block.md

@@ -47,6 +47,9 @@ python bits.py checkpoints/pretrain-rope-bpe/model.pt checkpoints/pretrain-rope-
 python diffusion_bench.py checkpoints/pretrain-rope-bpe-diffusion/model.pt --against checkpoints/pretrain-rope-bpe/model.pt --judge checkpoints/pretrain-ddp/model.pt
 python pretrain.py 5 --rope --bpe --diffusion --init checkpoints/pretrain-rope-bpe/model.pt  # from a next-token model
 python grpo.py 10 0.05           # reinforcement learning with GRPO: 8 stories per instruction, no critic, for 10 minutes
+python summary.py --rope --modern   # a modern block: RMSNorm, SwiGLU, QK-norm and no biases
+python pretrain.py 10 --rope --modern   # pretrain with it, to checkpoints/pretrain-rope-modern
+python -m pytest tests/test_block.py    # check the modern block against PyTorch and the original block
 ```
 
 ## Docs

@@ -84,3 +84,5 @@ Both training runs log to TensorBoard, under `runs/`.
   hidden tokens and writing a story by unhiding it, next to next-token prediction and LLaDA.
 - [Reinforcement learning, with GRPO](grpo.md): eight stories per instruction, each scored against
   its group in place of PPO's critic, as DeepSeekMath and DeepSeek-R1 train, next to PPO.
+- [A modern transformer block](modern-block.md): RMSNorm, SwiGLU, QK-norm and no biases, as options,
+  from the papers that introduced them, with the parameters counted and tests against PyTorch's.
