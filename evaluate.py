@@ -86,7 +86,13 @@ def instruction_metrics(model, tokenizer, instructions, examples):
 def name(path):
     # checkpoints/pretrain/model.pt is "pretrain", and checkpoints/pretrain/step-250.pt is "step-250".
     stem = os.path.splitext(os.path.basename(path))[0]
-    return os.path.basename(os.path.dirname(path)) if stem == "model" else stem
+    if stem != "model":
+        return stem
+    folder = os.path.dirname(path)
+    # A run per KL weight, such as ppo/kl-0.05 or grpo/kl-0.05, is named with its method: "ppo-kl-0.05".
+    if os.path.basename(folder).startswith("kl-"):
+        return f"{os.path.basename(os.path.dirname(folder))}-{os.path.basename(folder)}"
+    return os.path.basename(folder)
 
 
 def main():
