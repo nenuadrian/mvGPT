@@ -12,7 +12,7 @@ from diffusion import hidden_losses, mask_id
 from model import pick_device
 from tokenizer import EOT
 
-CHARACTERS = 2_000_000  # of the validation stories
+CHARACTERS = 2_000_000  # of the validation stories, or of the held-out web pages
 RATES = 16  # slices of 0 to 1, for a diffusion model's mask rates
 
 
@@ -59,13 +59,14 @@ def bits_per_character(model, tokenizer, text, batch=16):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Bits per character on held-out stories, for models with any tokenizer.")
+    parser = argparse.ArgumentParser(description="Bits per character on held-out stories or web pages, for models with any tokenizer.")
     parser.add_argument("checkpoints", nargs="+")
     parser.add_argument("--device", default=pick_device())
     parser.add_argument("--out", help="a file to write the measurements to, as JSON")
+    parser.add_argument("--web", action="store_true", help="the held-out web pages (data.py --web) instead of the stories")
     args = parser.parse_args()
 
-    with open(os.path.join(DATA_DIR, "valid.txt"), encoding="utf-8") as f:
+    with open(os.path.join(DATA_DIR, "valid-web.txt" if args.web else "valid.txt"), encoding="utf-8") as f:
         text = f.read(CHARACTERS)
     print(f"{'model':<40}{'tokens':>10}{'unknown':>9}{'chars/token':>13}{'round trip':>12}{'bits/char':>11}")
     rows = []
