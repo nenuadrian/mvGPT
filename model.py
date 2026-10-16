@@ -26,6 +26,7 @@ class GPTConfig:
     rope: bool = False  # rotary position embeddings, instead of a learned embedding per position
     causal: bool = True  # each token sees the ones before it; for diffusion (diffusion.py), all of them
     rmsnorm: bool = False  # RMSNorm in place of LayerNorm: each token's channels rescaled, not centred
+    swiglu: bool = False  # a gated MLP, SwiGLU, in place of GELU's
 
 
 class KVCache:
@@ -131,15 +132,27 @@ def gelu(x):
     return 0.5 * x * (1.0 + torch.erf(x / math.sqrt(2.0)))
 
 
+def silu(x):
+    # x times its sigmoid: close to x when x is large, close to 0 when it's very negative, and smooth between.
+    return x * torch.sigmoid(x)
+
+
 class MLP(nn.Module):
     def __init__(self, config):
         super().__init__()
-        self.up_proj = nn.Linear(config.n_embd, 4 * config.n_embd, bias=config.bias)
-        self.down_proj = nn.Linear(4 * config.n_embd, config.n_embd, bias=config.bias)
+        # SwiGLU has three matrices to GELU's two, so at 8/3 of the embedding size wide, it has as many weights,
+        # rounded up to a multiple of 64, a size GPUs handle well: 1,024 for our 384.
+        hidden = 64 * math.ceil(8 * config.n_embd / 3 / 64) if config.swiglu else 4 * config.n_embd
+        # The gate: a second projection up, which scales each of up_proj's channels on the way through.
+        self.gate_proj = nn.Linear(config.n_embd, hidden, bias=config.bias) if config.swiglu else None
+        self.up_proj = nn.Linear(config.n_embd, hidden, bias=config.bias)
+        self.down_proj = nn.Linear(hidden, config.n_embd, bias=config.bias)
         self.dropout = nn.Dropout(config.dropout)
 
     def forward(self, x):
-        return self.dropout(self.down_proj(gelu(self.up_proj(x))))
+        if self.gate_proj is None:
+            return self.dropout(self.down_proj(gelu(self.up_proj(x))))
+        return self.dropout(self.down_proj(silu(self.gate_proj(x)) * self.up_proj(x)))
 
 
 class Block(nn.Module):

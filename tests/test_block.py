@@ -1,7 +1,7 @@
 import torch
 from torch.nn import functional as F
 
-from model import RMSNorm
+from model import MLP, GPTConfig, RMSNorm
 
 
 def test_rmsnorm_matches_pytorch_and_brings_each_token_to_a_root_mean_square_of_1():
@@ -12,3 +12,12 @@ def test_rmsnorm_matches_pytorch_and_brings_each_token_to_a_root_mean_square_of_
     assert (y - F.rms_norm(x, (384,), norm.weight, eps=norm.eps)).abs().max() < 1e-5
     # With its gains at 1, each token's channels come out with a root mean square of 1.
     assert (y.pow(2).mean(dim=-1).sqrt() - 1).abs().max() < 1e-4
+
+
+def test_swiglu_has_as_many_weights_as_gelus_mlp():
+    counts = []
+    for swiglu in (False, True):
+        mlp = MLP(GPTConfig(swiglu=swiglu, bias=False))
+        counts.append(sum(p.numel() for p in mlp.parameters()))
+    # GELU's two matrices of 384 x 1,536, and SwiGLU's three of 384 x 1,024: 1,179,648 weights each.
+    assert counts == [1_179_648, 1_179_648]
