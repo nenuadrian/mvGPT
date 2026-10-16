@@ -30,6 +30,11 @@ class GPTConfig:
     qk_norm: bool = False  # RMSNorm on each head's queries and keys, before attention compares them
 
 
+# A modern block: RMSNorm, SwiGLU and no biases, as in LLaMA, and QK-norm, as in OLMo 2 and Qwen3. RoPE,
+# which they use too, has a flag of its own.
+MODERN = dict(rmsnorm=True, swiglu=True, qk_norm=True, bias=False)
+
+
 class KVCache:
     def __init__(self, n_layer):
         # Per block: the keys and values of the tokens so far, each (B, heads, tokens, 64).
@@ -81,6 +86,10 @@ class RMSNorm(nn.Module):
         # Each token's channels divided by their root mean square, which brings it to 1, with eps against dividing by 0.
         y = x32 * torch.rsqrt(x32.pow(2).mean(dim=-1, keepdim=True) + self.eps)
         return y.type_as(x) * self.weight
+
+    def extra_repr(self):
+        # What printing the model shows in the brackets, as LayerNorm shows its size.
+        return f"{self.weight.numel()}, eps={self.eps}"
 
 
 def norm_layer(config, size):

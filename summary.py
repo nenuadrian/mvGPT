@@ -1,11 +1,13 @@
 import math
+import sys
 
 import torch
 
-from model import GPT, GPTConfig
+from model import MODERN, GPT, GPTConfig
 
 torch.manual_seed(1337)
-config = GPTConfig()
+# --rope: rotary position embeddings. --modern: the modern block, with RMSNorm, SwiGLU, QK-norm and no biases.
+config = GPTConfig(rope="--rope" in sys.argv, **(MODERN if "--modern" in sys.argv else {}))
 model = GPT(config)
 print(model)
 
@@ -22,7 +24,9 @@ print(f"{'total':<16}{model.num_params():>12,}")
 model.eval()
 x = torch.randint(config.vocab_size, (2, 4))
 y = torch.randint(config.vocab_size, (2, 4))
-watch = ["embed_tokens", "embed_positions", *(f"blocks.{i}" for i in range(config.n_layer)), "norm", "lm_head"]
+# With rotary embeddings, there's no table of positions to watch.
+positions = [] if config.rope else ["embed_positions"]
+watch = ["embed_tokens", *positions, *(f"blocks.{i}" for i in range(config.n_layer)), "norm", "lm_head"]
 hooks = [
     model.get_submodule(name).register_forward_hook(
         lambda module, inputs, output, name=name: print(f"{name:<16}{tuple(output.shape)}")
