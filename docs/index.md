@@ -80,3 +80,5 @@ Both training runs log to TensorBoard, under `runs/`.
   Mac, then as a Triton kernel on an NVIDIA GPU, forwards and backwards, next to PyTorch's own.
 - [Serving many at once](serving.md): the model as an OpenAI-style completions API, the requests
   waiting written together as a batch, measured under a crowd of players, in Docker, and vLLM.
+- [Text diffusion](diffusion.md): the same transformer, attending both ways, trained to fill in
+  hidden tokens and writing a story by unhiding it, next to next-token prediction and LLaDA.

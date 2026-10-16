@@ -82,3 +82,4 @@ nav:
   - Training on several GPUs: distributed.md
   - Flash attention: flash-attention.md
   - Serving many at once: serving.md
+  - Text diffusion: diffusion.md

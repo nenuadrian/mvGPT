@@ -39,6 +39,13 @@ python context.py checkpoints/pretrain/model.pt checkpoints/pretrain-rope/model.
 python attention_bench.py --device cpu   # attention by hand and flash attention: time and memory, by length
 python server.py         # the model as an OpenAI-style completions API, at http://127.0.0.1:8000
 python load.py           # a crowd of players against the server: tokens a second, and how long they wait
+python diffusion.py mask                         # a held-out story with some of its tokens hidden
+python pretrain.py 10 --rope --bpe --diffusion   # a masked diffusion model, to checkpoints/pretrain-rope-bpe-diffusion
+python diffusion.py write checkpoints/pretrain-rope-bpe-diffusion/model.pt --ladder 8 16 32 64  # write by unhiding
+python diffusion.py fill checkpoints/pretrain-rope-bpe-diffusion/model.pt "Once upon a time, there was a little dog named Max." "Max was never scared of the dark again."
+python bits.py checkpoints/pretrain-rope-bpe/model.pt checkpoints/pretrain-rope-bpe-diffusion/model.pt  # bits per character, a bound for diffusion
+python diffusion_bench.py checkpoints/pretrain-rope-bpe-diffusion/model.pt --against checkpoints/pretrain-rope-bpe/model.pt --judge checkpoints/pretrain-ddp/model.pt
+python pretrain.py 5 --rope --bpe --diffusion --init checkpoints/pretrain-rope-bpe/model.pt  # from a next-token model
 ```
 
 ## Docs
