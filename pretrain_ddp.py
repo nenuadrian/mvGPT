@@ -43,6 +43,9 @@ def main():
     parser.add_argument("--batch", type=int, default=48, help="sequences per GPU per step")
     parser.add_argument("--dropout", type=float, default=0.0)
     parser.add_argument("--full", action="store_true", help="all of TinyStories: python data.py --full")
+    parser.add_argument("--web", action="store_true", help="FineWeb-Edu, with its own merges: python data.py --web N")
+    parser.add_argument("--accum", type=int, default=1, help="batches whose gradients add up to each step")
+    parser.add_argument("--resume", action="store_true", help="carry on from the run's last checkpoint")
     parser.add_argument("--compile", action="store_true")
     parser.add_argument("--attention", default="pytorch", choices=["pytorch", "by-hand", "triton"],
                         help="PyTorch's, ours written out (attention.py), or our flash attention kernel (flash.py)")
@@ -58,13 +61,20 @@ def main():
     main_rank = rank == 0
     # Each rank draws different batches; with one seed, they'd all train on the same data.
     torch.manual_seed(1337 + rank)
-    tokenizer = load_tokenizer(bpe=True)
+    tokenizer = load_tokenizer(bpe=True, merges="web-merges.txt" if args.web else "merges.txt")
     config = GPTConfig(vocab_size=len(tokenizer) + 1 if args.diffusion else len(tokenizer), block_size=args.block,
                        n_layer=args.layers, n_head=args.heads, n_embd=args.embd, dropout=args.dropout, rope=True,
                        causal=not args.diffusion, n_kv_head=args.kv_heads, **(MODERN if args.modern else {}))
     raw = GPT(config).to(device)
     if args.init:
         from_autoregressive(raw, args.init)
+    # A run that resumes carries on from the weights, the optimiser's state, the step and the clock it saved.
+    name = args.name or "pretrain-" + ("web" if args.web else "ddp") + ("-modern" if args.modern else "") + \
+        (f"-kv{args.kv_heads}" if args.kv_heads else "")
+    run_dir = os.path.join(CHECKPOINTS, name)
+    resume = torch.load(os.path.join(run_dir, "resume.pt"), map_location=device) if args.resume else None
+    if resume:
+        raw.load_state_dict(torch.load(os.path.join(run_dir, "model.pt"), map_location=device)["model"])
 
     def loss_of(model, x, y):
         return diffusion_loss(model, x, mask_id(tokenizer)) if args.diffusion else next_token_loss(model, x, y)
@@ -78,10 +88,12 @@ def main():
     # DDP gives all ranks rank 0's starting weights, and averages the gradients across them after each backward.
     model = DDP(torch.compile(raw) if args.compile else raw,
                 device_ids=[int(device.split(":")[1])] if device.startswith("cuda") else None)
-    train = "train-full-bpe.bin" if args.full else "train-bpe.bin"
-    # The held-out stories are the ones the laptop's models were measured on.
+    train = "train-web.bin" if args.web else "train-full-bpe.bin" if args.full else "train-bpe.bin"
+    # The held-out stories are the ones the laptop's models were measured on; the web has pages of its own.
+    valid = "valid-web.bin" if args.web else "valid-bpe.bin"
     splits = {"train": np.memmap(os.path.join(DATA_DIR, train), dtype=np.uint16, mode="r"),
-              "valid": np.memmap(os.path.join(DATA_DIR, "valid-bpe.bin"), dtype=np.uint16, mode="r")}
+              "valid": np.memmap(os.path.join(DATA_DIR, valid), dtype=np.uint16, mode="r")}
+    prompt = "Photosynthesis is" if args.web else "Once upon a time"
     if main_rank:
         gpu = torch.cuda.get_device_name() if device.startswith("cuda") else "CPU"
         kind = "diffusion" + (f" from {args.init}" if args.init else "") if args.diffusion else f"{args.attention} attention"
@@ -94,10 +106,8 @@ def main():
          {"params": [p for p in params if p.dim() < 2], "weight_decay": 0.0}],
         lr=LR, betas=(0.9, 0.95),
     )
-    # A run with the modern block or fewer heads of keys and values gets a folder of its own, so it doesn't
-    # overwrite pretrain-ddp.
-    name = args.name or "pretrain-ddp" + ("-modern" if args.modern else "") + (f"-kv{args.kv_heads}" if args.kv_heads else "")
-    run_dir = os.path.join(CHECKPOINTS, name)
+    if resume:
+        optimizer.load_state_dict(resume["optimizer"])
     writer = SummaryWriter(os.path.join(RUNS, time.strftime(f"{name}-%Y%m%d-%H%M%S"))) if main_rank else None
     # On NVIDIA GPUs, bfloat16 for the matrix multiplications: half the memory traffic, a lot more throughput.
     amp = torch.autocast("cuda", dtype=torch.bfloat16) if device.startswith("cuda") else nullcontext()
@@ -108,23 +118,29 @@ def main():
             with amp:
                 losses = estimate_loss(raw, splits, loss_of)
                 if args.diffusion:
-                    story = write_by_denoising(raw, tokenizer, "Once upon a time", tokens=44)
+                    story = write_by_denoising(raw, tokenizer, prompt, tokens=44)
                 else:
-                    story = write(raw, tokenizer, "Once upon a time", max_new_tokens=40)
+                    story = write(raw, tokenizer, prompt, max_new_tokens=40)
             writer.add_scalar("loss/train", losses["train"], step)
             writer.add_scalar("loss/valid", losses["valid"], step)
             writer.add_text("sample", story, step)
             writer.flush()
             print(f"step {step:>5} | train {losses['train']:.3f} | valid {losses['valid']:.3f} | {story}", flush=True)
-            # Saved at each evaluation: a rented machine can go away mid-run.
+            # Saved at each evaluation: a rented machine can go away mid-run. Resume.pt has what it takes to carry
+            # on: the optimiser's averages, the step, and the seconds trained so far.
             save_checkpoint(os.path.join(run_dir, "model.pt"), raw, tokenizer, step=step, gpus=world)
+            torch.save({"optimizer": optimizer.state_dict(), "step": step, "elapsed": time.time() - start},
+                       os.path.join(run_dir, "resume.pt"))
         # The other ranks wait here while rank 0 evaluates, so they all set off again together.
         dist.barrier(device_ids=[torch.cuda.current_device()] if device.startswith("cuda") else None)
 
     budget = args.minutes * 60
-    start = last = time.time()
-    step = 0
-    evaluate(step)
+    # A resumed run's clock starts where the saved one stopped, so the learning rate picks up where it was.
+    last = time.time()
+    start = last - (resume["elapsed"] if resume else 0)
+    step = resume["step"] if resume else 0
+    if not resume:
+        evaluate(step)
     elapsed = torch.zeros(1, device=device)
     while True:
         # Rank 0's clock decides, for all of them: the same learning rate, and the same last step.
@@ -135,19 +151,23 @@ def main():
         lr = learning_rate(step, elapsed.item() / budget)
         for group in optimizer.param_groups:
             group["lr"] = lr
-        x, y = get_batch(splits["train"], config.block_size, args.batch, device)
-        with amp:
-            loss = loss_of(model, x, y)
         optimizer.zero_grad(set_to_none=True)
-        loss.backward()
+        for micro in range(args.accum):
+            x, y = get_batch(splits["train"], config.block_size, args.batch, device)
+            # The gradients of several batches add up before a step, a bigger batch than fits at once. DDP
+            # averages them across the GPUs on the last backward alone.
+            with model.no_sync() if micro < args.accum - 1 else nullcontext():
+                with amp:
+                    loss = loss_of(model, x, y)
+                (loss / args.accum).backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
         optimizer.step()
         step += 1
 
         if step % 50 == 0 and main_rank:
             now = time.time()
-            # Tokens per second for all the GPUs together: each did a batch per step.
-            speed = 50 * world * args.batch * config.block_size / (now - last)
+            # Tokens per second for all the GPUs together: each did accum batches per step.
+            speed = 50 * world * args.accum * args.batch * config.block_size / (now - last)
             last = now
             writer.add_scalar("loss/batch", loss.item(), step)
             writer.add_scalar("tokens_per_s", speed, step)
@@ -160,7 +180,7 @@ def main():
         evaluate(step)
     if main_rank:
         writer.close()
-        tokens = step * world * args.batch * config.block_size
+        tokens = step * world * args.accum * args.batch * config.block_size
         memory = f", {torch.cuda.max_memory_allocated() / 2**30:.1f} GB per GPU" if device.startswith("cuda") else ""
         print(f"done: {step:,} steps, {tokens:,} tokens, {(time.time() - start) / 60:.1f} minutes, "
               f"{tokens / (time.time() - start):,.0f} tokens/s{memory}", flush=True)
