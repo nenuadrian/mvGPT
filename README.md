@@ -50,6 +50,8 @@ python grpo.py 10 0.05           # reinforcement learning with GRPO: 8 stories p
 python summary.py --rope --modern   # a modern block: RMSNorm, SwiGLU, QK-norm and no biases
 python pretrain.py 10 --rope --modern   # pretrain with it, to checkpoints/pretrain-rope-modern
 python -m pytest tests/test_block.py    # check the modern block against PyTorch and the original block
+python summary.py --rope --modern --kv-heads 2   # grouped-query attention: 2 heads of keys and values, and the KV cache's size
+python -m pytest tests/test_gqa.py      # check it against multi-head attention, and the cache against the whole sequence
 ```
 
 ## Docs

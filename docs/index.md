@@ -86,3 +86,5 @@ Both training runs log to TensorBoard, under `runs/`.
   its group in place of PPO's critic, as DeepSeekMath and DeepSeek-R1 train, next to PPO.
 - [A modern transformer block](modern-block.md): RMSNorm, SwiGLU, QK-norm and no biases, as options,
   from the papers that introduced them, with the parameters counted and tests against PyTorch's.
+- [Grouped-query attention](gqa.md): query heads that share their keys and values in groups, for a
+  smaller KV cache and smaller key and value projections, checked against multi-head attention.

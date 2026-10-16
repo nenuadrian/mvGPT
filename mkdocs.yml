@@ -85,3 +85,4 @@ nav:
   - Text diffusion: diffusion.md
   - Reinforcement learning, with GRPO: grpo.md
   - A modern transformer block: modern-block.md
+  - Grouped-query attention: gqa.md
