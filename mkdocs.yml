@@ -83,3 +83,4 @@ nav:
   - Flash attention: flash-attention.md
   - Serving many at once: serving.md
   - Text diffusion: diffusion.md
+  - Reinforcement learning, with GRPO: grpo.md

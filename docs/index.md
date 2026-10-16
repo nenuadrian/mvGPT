@@ -82,3 +82,5 @@ Both training runs log to TensorBoard, under `runs/`.
   waiting written together as a batch, measured under a crowd of players, in Docker, and vLLM.
 - [Text diffusion](diffusion.md): the same transformer, attending both ways, trained to fill in
   hidden tokens and writing a story by unhiding it, next to next-token prediction and LLaDA.
+- [Reinforcement learning, with GRPO](grpo.md): eight stories per instruction, each scored against
+  its group in place of PPO's critic, as DeepSeekMath and DeepSeek-R1 train, next to PPO.

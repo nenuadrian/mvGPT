@@ -46,6 +46,7 @@ python diffusion.py fill checkpoints/pretrain-rope-bpe-diffusion/model.pt "Once 
 python bits.py checkpoints/pretrain-rope-bpe/model.pt checkpoints/pretrain-rope-bpe-diffusion/model.pt  # bits per character, a bound for diffusion
 python diffusion_bench.py checkpoints/pretrain-rope-bpe-diffusion/model.pt --against checkpoints/pretrain-rope-bpe/model.pt --judge checkpoints/pretrain-ddp/model.pt
 python pretrain.py 5 --rope --bpe --diffusion --init checkpoints/pretrain-rope-bpe/model.pt  # from a next-token model
+python grpo.py 10 0.05           # reinforcement learning with GRPO: 8 stories per instruction, no critic, for 10 minutes
 ```
 
 ## Docs
