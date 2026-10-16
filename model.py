@@ -28,6 +28,7 @@ class GPTConfig:
     rmsnorm: bool = False  # RMSNorm in place of LayerNorm: each token's channels rescaled, not centred
     swiglu: bool = False  # a gated MLP, SwiGLU, in place of GELU's
     qk_norm: bool = False  # RMSNorm on each head's queries and keys, before attention compares them
+    n_kv_head: int | None = None  # heads of keys and values, each shared by a group of query heads; None is n_head
 
 
 # A modern block: RMSNorm, SwiGLU and no biases, as in LLaMA, and QK-norm, as in OLMo 2 and Qwen3. RoPE,
@@ -37,7 +38,7 @@ MODERN = dict(rmsnorm=True, swiglu=True, qk_norm=True, bias=False)
 
 class KVCache:
     def __init__(self, n_layer):
-        # Per block: the keys and values of the tokens so far, each (B, heads, tokens, 64).
+        # Per block: the keys and values of the tokens so far, each (B, key and value heads, tokens, 64).
         self.keys = [None] * n_layer
         self.values = [None] * n_layer
         # The position of the next token, which, once the cache slides, is past the tokens it keeps.
@@ -101,13 +102,17 @@ class CausalSelfAttention(nn.Module):
     def __init__(self, config, layer):
         super().__init__()
         self.n_head = config.n_head
+        # Grouped-query attention: n_kv_head heads of keys and values, each shared by a group of query heads.
+        self.n_kv_head = config.n_kv_head or config.n_head
+        if self.n_head % self.n_kv_head:
+            raise ValueError(f"n_head ({self.n_head}) must be a multiple of n_kv_head ({self.n_kv_head})")
         self.layer = layer
         self.causal = config.causal
-        self.q_proj = nn.Linear(config.n_embd, config.n_embd, bias=config.bias)
-        self.k_proj = nn.Linear(config.n_embd, config.n_embd, bias=config.bias)
-        self.v_proj = nn.Linear(config.n_embd, config.n_embd, bias=config.bias)
-        self.o_proj = nn.Linear(config.n_embd, config.n_embd, bias=config.bias)
         head_size = config.n_embd // config.n_head
+        self.q_proj = nn.Linear(config.n_embd, config.n_embd, bias=config.bias)
+        self.k_proj = nn.Linear(config.n_embd, self.n_kv_head * head_size, bias=config.bias)
+        self.v_proj = nn.Linear(config.n_embd, self.n_kv_head * head_size, bias=config.bias)
+        self.o_proj = nn.Linear(config.n_embd, config.n_embd, bias=config.bias)
         # Queries and keys rescaled to a root mean square of 1, so the scores don't grow with their projections' weights.
         self.q_norm = RMSNorm(head_size) if config.qk_norm else None
         self.k_norm = RMSNorm(head_size) if config.qk_norm else None
@@ -119,8 +124,8 @@ class CausalSelfAttention(nn.Module):
     def forward(self, x, cache=None, angles=None):
         B, T, C = x.shape  # batch, tokens, channels
         q = self.q_proj(x).view(B, T, self.n_head, C // self.n_head).transpose(1, 2)
-        k = self.k_proj(x).view(B, T, self.n_head, C // self.n_head).transpose(1, 2)
-        v = self.v_proj(x).view(B, T, self.n_head, C // self.n_head).transpose(1, 2)
+        k = self.k_proj(x).view(B, T, self.n_kv_head, C // self.n_head).transpose(1, 2)
+        v = self.v_proj(x).view(B, T, self.n_kv_head, C // self.n_head).transpose(1, 2)
         if self.q_norm is not None:
             q, k = self.q_norm(q), self.k_norm(k)
         if angles is not None:
@@ -128,6 +133,10 @@ class CausalSelfAttention(nn.Module):
             q, k = rotate(q, *angles), rotate(k, *angles)
         if cache is not None:
             k, v = cache.update(self.layer, k, v)
+        if self.n_kv_head != self.n_head:
+            # The cache keeps the fewer heads; attention needs one per query head, so each is repeated for its group.
+            k = k.repeat_interleave(self.n_head // self.n_kv_head, dim=1)
+            v = v.repeat_interleave(self.n_head // self.n_kv_head, dim=1)
         S = k.size(2)  # the tokens attended to: the cached ones and these T
         # Query i is token S - T + i, which sees the keys up to its own. A single new token sees all S.
         mask = None if T in (1, S) else torch.ones(T, S, dtype=torch.bool, device=x.device).tril(S - T)
