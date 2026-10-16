@@ -3,11 +3,13 @@ import sys
 
 import torch
 
-from model import MODERN, GPT, GPTConfig
+from model import MODERN, GPT, GPTConfig, kv_cache_bytes
 
 torch.manual_seed(1337)
 # --rope: rotary position embeddings. --modern: the modern block, with RMSNorm, SwiGLU, QK-norm and no biases.
-config = GPTConfig(rope="--rope" in sys.argv, **(MODERN if "--modern" in sys.argv else {}))
+# --kv-heads N: grouped-query attention, with N heads of keys and values.
+kv_heads = int(sys.argv[sys.argv.index("--kv-heads") + 1]) if "--kv-heads" in sys.argv else None
+config = GPTConfig(rope="--rope" in sys.argv, n_kv_head=kv_heads, **(MODERN if "--modern" in sys.argv else {}))
 model = GPT(config)
 print(model)
 
@@ -20,6 +22,9 @@ print()
 for layer, n in counts.items():
     print(f"{layer:<16}{n:>12,}")
 print(f"{'total':<16}{model.num_params():>12,}")
+# What the KV cache keeps as the model writes, from the config: per token, and for a full window.
+print(f"{'kv cache':<16}{kv_cache_bytes(config, 1):>12,} bytes a token, "
+      f"{kv_cache_bytes(config, config.block_size) / 1e6:.2f} MB for {config.block_size} tokens")
 
 model.eval()
 x = torch.randint(config.vocab_size, (2, 4))

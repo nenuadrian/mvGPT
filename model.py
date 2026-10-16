@@ -60,6 +60,12 @@ class KVCache:
         return k, v
 
 
+def kv_cache_bytes(config, tokens, bytes_per_number=4):
+    # Per token, a key and a value for each layer, key and value head and channel; float32 is 4 bytes a number.
+    per_token = 2 * config.n_layer * (config.n_kv_head or config.n_head) * (config.n_embd // config.n_head)
+    return per_token * tokens * bytes_per_number
+
+
 def rotary(start, T, head_size, device):
     # The angles for positions start to start + T - 1, one per pair of channels, as cosines and sines:
     # they turn faster for the first pairs and slower for the last ones.

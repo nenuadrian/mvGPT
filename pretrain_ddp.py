@@ -50,7 +50,8 @@ def main():
                         help="a diffusion model: attention both ways, trained to fill in hidden tokens (diffusion.py)")
     parser.add_argument("--init", help="for --diffusion, start from this next-token model's weights")
     parser.add_argument("--modern", action="store_true", help="RMSNorm, SwiGLU, QK-norm, no biases: model.py's MODERN")
-    parser.add_argument("--name", help="the run's folder: by default pretrain-ddp, with -modern after it for --modern")
+    parser.add_argument("--kv-heads", type=int, help="grouped-query attention, with this many heads of keys and values")
+    parser.add_argument("--name", help="the run's folder: by default pretrain-ddp, with -modern and -kvN after it")
     args = parser.parse_args()
 
     rank, world, device = setup()
@@ -60,7 +61,7 @@ def main():
     tokenizer = load_tokenizer(bpe=True)
     config = GPTConfig(vocab_size=len(tokenizer) + 1 if args.diffusion else len(tokenizer), block_size=args.block,
                        n_layer=args.layers, n_head=args.heads, n_embd=args.embd, dropout=args.dropout, rope=True,
-                       causal=not args.diffusion, **(MODERN if args.modern else {}))
+                       causal=not args.diffusion, n_kv_head=args.kv_heads, **(MODERN if args.modern else {}))
     raw = GPT(config).to(device)
     if args.init:
         from_autoregressive(raw, args.init)
@@ -93,8 +94,9 @@ def main():
          {"params": [p for p in params if p.dim() < 2], "weight_decay": 0.0}],
         lr=LR, betas=(0.9, 0.95),
     )
-    # A run with the modern block gets a folder of its own, so it doesn't overwrite pretrain-ddp.
-    name = args.name or "pretrain-ddp" + ("-modern" if args.modern else "")
+    # A run with the modern block or fewer heads of keys and values gets a folder of its own, so it doesn't
+    # overwrite pretrain-ddp.
+    name = args.name or "pretrain-ddp" + ("-modern" if args.modern else "") + (f"-kv{args.kv_heads}" if args.kv_heads else "")
     run_dir = os.path.join(CHECKPOINTS, name)
     writer = SummaryWriter(os.path.join(RUNS, time.strftime(f"{name}-%Y%m%d-%H%M%S"))) if main_rank else None
     # On NVIDIA GPUs, bfloat16 for the matrix multiplications: half the memory traffic, a lot more throughput.

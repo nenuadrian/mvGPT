@@ -1,7 +1,7 @@
 import pytest
 import torch
 
-from model import GPT, MODERN, GPTConfig, KVCache
+from model import GPT, MODERN, GPTConfig, KVCache, kv_cache_bytes
 
 
 def tiny(n_kv_head, modern):
@@ -34,3 +34,14 @@ def test_the_cache_holds_fewer_heads_and_matches_running_the_whole_sequence(n_kv
     assert (torch.cat(steps, dim=1) - full).abs().max() < 1e-5
     # Batch, key and value heads, tokens, channels per head.
     assert cache.keys[0].shape == (2, n_kv_head, 12, 8)
+
+
+def test_kv_cache_bytes_counts_what_the_cache_holds():
+    model = tiny(2, modern=True)
+    cache = KVCache(model.config.n_layer)
+    model(torch.randint(50, (1, 10)), cache=cache)
+    held = sum(t.numel() * t.element_size() for t in cache.keys + cache.values)
+    assert held == kv_cache_bytes(model.config, 10)
+    # Our model: 18,432 bytes a token with a key and value head per query head, and a third of that with 2.
+    assert kv_cache_bytes(GPTConfig(), 1) == 18_432
+    assert kv_cache_bytes(GPTConfig(n_kv_head=2), 1) == 6_144

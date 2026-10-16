@@ -55,17 +55,18 @@ def learning_rate(step, progress):
     return MIN_LR + 0.5 * (LR - MIN_LR) * (1 + math.cos(math.pi * progress))
 
 
-def main(minutes, rope=False, bpe=False, diffusion=False, init=None, modern=False):
+def main(minutes, rope=False, bpe=False, diffusion=False, init=None, modern=False, kv_heads=None):
     # Each kind of model gets a run folder of its own: pretrain, pretrain-rope, pretrain-rope-bpe, ...
     run_dir = os.path.join(CHECKPOINTS, "pretrain" + ("-rope" if rope else "") + ("-bpe" if bpe else "")
-                           + ("-modern" if modern else "") + ("-diffusion" if diffusion else "")
+                           + ("-modern" if modern else "") + (f"-kv{kv_heads}" if kv_heads else "")
+                           + ("-diffusion" if diffusion else "")
                            + ("-converted" if init else ""))
     torch.manual_seed(1337)
     device = pick_device()
     tokenizer = load_tokenizer(bpe)
     # A diffusion model attends both ways, and has one more token, [MASK].
     config = GPTConfig(vocab_size=len(tokenizer) + 1 if diffusion else len(tokenizer), rope=rope, causal=not diffusion,
-                       **(MODERN if modern else {}))
+                       n_kv_head=kv_heads, **(MODERN if modern else {}))
     model = GPT(config).to(device)
     if init:
         from_autoregressive(model, init)
@@ -149,5 +150,7 @@ def main(minutes, rope=False, bpe=False, diffusion=False, init=None, modern=Fals
 if __name__ == "__main__":
     # --init PATH starts a diffusion model from a next-token model's weights.
     init = sys.argv[sys.argv.index("--init") + 1] if "--init" in sys.argv else None
+    # --kv-heads N: grouped-query attention, with N heads of keys and values.
+    kv_heads = int(sys.argv[sys.argv.index("--kv-heads") + 1]) if "--kv-heads" in sys.argv else None
     main(float(sys.argv[1]) if len(sys.argv) > 1 else 10, rope="--rope" in sys.argv, bpe="--bpe" in sys.argv,
-         diffusion="--diffusion" in sys.argv, init=init, modern="--modern" in sys.argv)
+         diffusion="--diffusion" in sys.argv, init=init, modern="--modern" in sys.argv, kv_heads=kv_heads)
