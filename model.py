@@ -25,6 +25,7 @@ class GPTConfig:
     bias: bool = True
     rope: bool = False  # rotary position embeddings, instead of a learned embedding per position
     causal: bool = True  # each token sees the ones before it; for diffusion (diffusion.py), all of them
+    rmsnorm: bool = False  # RMSNorm in place of LayerNorm: each token's channels rescaled, not centred
 
 
 class KVCache:
@@ -63,6 +64,26 @@ def rotate(x, cos, sin):
     # Rotary position embedding: each pair of channels (i, i + 32) is turned by its position's angle.
     x1, x2 = x[..., : x.size(-1) // 2], x[..., x.size(-1) // 2 :]
     return torch.cat([x1 * cos - x2 * sin, x1 * sin + x2 * cos], dim=-1)
+
+
+class RMSNorm(nn.Module):
+    def __init__(self, size, eps=1e-6):
+        super().__init__()
+        self.eps = eps
+        # A gain per channel, starting at 1, and no bias.
+        self.weight = nn.Parameter(torch.ones(size))
+
+    def forward(self, x):
+        # In float32, as squaring in bfloat16 loses precision, and then back to x's type.
+        x32 = x.float()
+        # Each token's channels divided by their root mean square, which brings it to 1, with eps against dividing by 0.
+        y = x32 * torch.rsqrt(x32.pow(2).mean(dim=-1, keepdim=True) + self.eps)
+        return y.type_as(x) * self.weight
+
+
+def norm_layer(config, size):
+    # LayerNorm subtracts the mean of a token's channels and divides by their spread; RMSNorm skips the mean.
+    return RMSNorm(size) if config.rmsnorm else nn.LayerNorm(size, bias=config.bias)
 
 
 class CausalSelfAttention(nn.Module):
@@ -124,9 +145,9 @@ class MLP(nn.Module):
 class Block(nn.Module):
     def __init__(self, config, layer):
         super().__init__()
-        self.attn_norm = nn.LayerNorm(config.n_embd, bias=config.bias)
+        self.attn_norm = norm_layer(config, config.n_embd)
         self.attn = CausalSelfAttention(config, layer)
-        self.mlp_norm = nn.LayerNorm(config.n_embd, bias=config.bias)
+        self.mlp_norm = norm_layer(config, config.n_embd)
         self.mlp = MLP(config)
 
     def forward(self, x, cache=None, angles=None):
@@ -144,7 +165,7 @@ class GPT(nn.Module):
         self.embed_positions = None if config.rope else nn.Embedding(config.block_size, config.n_embd)
         self.drop = nn.Dropout(config.dropout)
         self.blocks = nn.ModuleList([Block(config, layer) for layer in range(config.n_layer)])
-        self.norm = nn.LayerNorm(config.n_embd, bias=config.bias)
+        self.norm = norm_layer(config, config.n_embd)
         self.lm_head = nn.Linear(config.n_embd, config.vocab_size, bias=False)
         # Weight tying: the head scores tokens with the matrix that embeds them.
         self.embed_tokens.weight = self.lm_head.weight
