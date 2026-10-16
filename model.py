@@ -27,6 +27,7 @@ class GPTConfig:
     causal: bool = True  # each token sees the ones before it; for diffusion (diffusion.py), all of them
     rmsnorm: bool = False  # RMSNorm in place of LayerNorm: each token's channels rescaled, not centred
     swiglu: bool = False  # a gated MLP, SwiGLU, in place of GELU's
+    qk_norm: bool = False  # RMSNorm on each head's queries and keys, before attention compares them
 
 
 class KVCache:
@@ -97,6 +98,10 @@ class CausalSelfAttention(nn.Module):
         self.k_proj = nn.Linear(config.n_embd, config.n_embd, bias=config.bias)
         self.v_proj = nn.Linear(config.n_embd, config.n_embd, bias=config.bias)
         self.o_proj = nn.Linear(config.n_embd, config.n_embd, bias=config.bias)
+        head_size = config.n_embd // config.n_head
+        # Queries and keys rescaled to a root mean square of 1, so the scores don't grow with their projections' weights.
+        self.q_norm = RMSNorm(head_size) if config.qk_norm else None
+        self.k_norm = RMSNorm(head_size) if config.qk_norm else None
         self.dropout_p = config.dropout
         self.resid_dropout = nn.Dropout(config.dropout)
         # Another function for causal attention over whole sequences, such as flash.py's kernel (GPT.attend_with).
@@ -107,6 +112,8 @@ class CausalSelfAttention(nn.Module):
         q = self.q_proj(x).view(B, T, self.n_head, C // self.n_head).transpose(1, 2)
         k = self.k_proj(x).view(B, T, self.n_head, C // self.n_head).transpose(1, 2)
         v = self.v_proj(x).view(B, T, self.n_head, C // self.n_head).transpose(1, 2)
+        if self.q_norm is not None:
+            q, k = self.q_norm(q), self.k_norm(k)
         if angles is not None:
             # Rotated by their positions, a query and a key score by how far apart they are, not where.
             q, k = rotate(q, *angles), rotate(k, *angles)
