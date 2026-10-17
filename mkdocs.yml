@@ -86,3 +86,4 @@ nav:
   - Reinforcement learning, with GRPO: grpo.md
   - A modern transformer block: modern-block.md
   - Grouped-query attention: gqa.md
+  - Pretraining on the web: web.md

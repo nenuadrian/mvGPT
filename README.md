@@ -52,6 +52,10 @@ python pretrain.py 10 --rope --modern   # pretrain with it, to checkpoints/pretr
 python -m pytest tests/test_block.py    # check the modern block against PyTorch and the original block
 python summary.py --rope --modern --kv-heads 2   # grouped-query attention: 2 heads of keys and values, and the KV cache's size
 python -m pytest tests/test_gqa.py      # check it against multi-head attention, and the cache against the whole sequence
+python data.py --web 1   # FineWeb-Edu: merges learned on web pages, the held-out pages, and one file of tokens
+torchrun --standalone --nproc_per_node 1 pretrain_ddp.py 470 --web --compile --block 1024 --batch 24 --accum 4  # a night on one GPU
+python hellaswag.py checkpoints/pretrain-web/model.pt   # HellaSwag; gpt2 for GPT-2 small
+python bits.py checkpoints/pretrain-ddp/model.pt checkpoints/pretrain-web/model.pt --web  # bits per character on web pages
 ```
 
 ## Docs

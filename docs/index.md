@@ -88,3 +88,5 @@ Both training runs log to TensorBoard, under `runs/`.
   from the papers that introduced them, with the parameters counted and tests against PyTorch's.
 - [Grouped-query attention](gqa.md): query heads that share their keys and values in groups, for a
   smaller KV cache and smaller key and value projections, checked against multi-head attention.
+- [Pretraining on the web](web.md): FineWeb-Edu with merges of its own, a night on one rented GPU
+  with gradient accumulation and resuming, and the model on HellaSwag next to GPT-2 small.
