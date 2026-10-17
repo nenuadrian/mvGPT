@@ -15,3 +15,5 @@ hf/
 # The C++ tokenizer, built by setup.py
 build/
 *.so
+# The agent's files, from python agent.py
+sandbox/

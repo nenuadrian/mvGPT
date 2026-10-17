@@ -13,7 +13,7 @@ CALL = re.compile(r"<<calc ([^<>]*)>>")
 OPS = {ast.Add: operator.add, ast.Sub: operator.sub, ast.Mult: operator.mul, ast.Div: operator.truediv}
 
 
-def calculate(expression):
+def calculate(expression, longest=100):
     # Numbers, + - * /, brackets and minus signs, and nothing else: a call the model writes can't run other code.
     def value(node):
         if isinstance(node, ast.Constant) and type(node.value) in (int, float):
@@ -24,7 +24,7 @@ def calculate(expression):
             return -value(node.operand)
         raise ValueError(f"not arithmetic: {ast.dump(node)}")
 
-    if len(expression) > 100:
+    if len(expression) > longest:
         return "error"
     try:
         return show(value(ast.parse(expression.strip(), mode="eval").body))
