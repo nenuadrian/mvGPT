@@ -90,3 +90,5 @@ Both training runs log to TensorBoard, under `runs/`.
   smaller KV cache and smaller key and value projections, checked against multi-head attention.
 - [Pretraining on the web](web.md): FineWeb-Edu with merges of its own, a night on one rented GPU
   with gradient accumulation and resuming, and the model on HellaSwag next to GPT-2 small.
+- [Tool use, a calculator](tools.md): calls as plain text, a calculator that takes arithmetic alone,
+  generated questions, fine-tuning with the results masked out, and the calls measured, the calculator on and off.

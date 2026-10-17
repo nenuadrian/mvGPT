@@ -87,3 +87,4 @@ nav:
   - A modern transformer block: modern-block.md
   - Grouped-query attention: gqa.md
   - Pretraining on the web: web.md
+  - Tool use, a calculator: tools.md

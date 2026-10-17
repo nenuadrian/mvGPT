@@ -56,6 +56,11 @@ python data.py --web 1   # FineWeb-Edu: merges learned on web pages, the held-ou
 torchrun --standalone --nproc_per_node 1 pretrain_ddp.py 470 --web --compile --block 1024 --batch 24 --accum 4  # a night on one GPU
 python hellaswag.py checkpoints/pretrain-web/model.pt   # HellaSwag; gpt2 for GPT-2 small
 python bits.py checkpoints/pretrain-ddp/model.pt checkpoints/pretrain-web/model.pt --web  # bits per character on web pages
+python tool_data.py      # 50,000 questions for the calculator, and five held-out sets
+python tool_sft.py 10    # fine-tune the web model to call it, for 10 minutes
+python tool_eval.py checkpoints/tools/model.pt   # the calls, right and with the calculator off; --shots for a pretrained model
+python tools.py checkpoints/tools/model.pt "What is 48213 * 907?"
+python -m pytest tests/test_tools.py   # the calculator, what it refuses, and the loop
 ```
 
 ## Docs
