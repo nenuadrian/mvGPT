@@ -61,6 +61,12 @@ python tool_sft.py 10    # fine-tune the web model to call it, for 10 minutes
 python tool_eval.py checkpoints/tools/model.pt   # the calls, right and with the calculator off; --shots for a pretrained model
 python tools.py checkpoints/tools/model.pt "What is 48213 * 907?"
 python -m pytest tests/test_tools.py   # the calculator, what it refuses, and the loop
+python agent_data.py     # 60,000 traces for the agent and its subagents
+python agent_sft.py 30   # fine-tune the web model into all three roles, for 30 minutes
+python agent_eval.py checkpoints/agent/model.pt   # held-out tasks, and subagents against one context
+python agent.py checkpoints/agent/model.pt "Add up the numbers in jan.txt and feb.txt."   # in ./sandbox
+python agent_app.py      # the agent in a chat, at http://127.0.0.1:7861
+python -m pytest tests/test_agent.py   # the sandbox, the roles, and a subagent's context
 ```
 
 ## Docs

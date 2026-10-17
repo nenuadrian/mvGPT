@@ -92,3 +92,5 @@ Both training runs log to TensorBoard, under `runs/`.
   with gradient accumulation and resuming, and the model on HellaSwag next to GPT-2 small.
 - [Tool use, a calculator](tools.md): calls as plain text, a calculator that takes arithmetic alone,
   generated questions, fine-tuning with the results masked out, and the calls measured, the calculator on and off.
+- [An agent, with subagents](agent.md): one model in three roles, files in a sandbox, subagents in fresh
+  contexts, and the agent against one context on a long task, then in a chat.

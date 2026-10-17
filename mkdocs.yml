@@ -88,3 +88,4 @@ nav:
   - Grouped-query attention: gqa.md
   - Pretraining on the web: web.md
   - Tool use, a calculator: tools.md
+  - An agent, with subagents: agent.md
