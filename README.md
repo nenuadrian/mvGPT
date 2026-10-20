@@ -67,6 +67,10 @@ python agent_eval.py checkpoints/agent/model.pt   # held-out tasks, and subagent
 python agent.py checkpoints/agent/model.pt "Add up the numbers in jan.txt and feb.txt."   # in ./sandbox
 python agent_app.py      # the agent in a chat, at http://127.0.0.1:7861
 python -m pytest tests/test_agent.py   # the sandbox, the roles, and a subagent's context
+python long.py checkpoints/pretrain-web/model.pt      # loss by position past the window: a sliding window, and four ways to stretch RoPE
+python passkey.py checkpoints/pretrain-web/model.pt   # a pass key hidden in filler, by length, for each way
+python long_train.py yarn 15                          # fine-tune at 4,096 tokens, stretched with yarn (or pi), for 15 minutes
+python -m pytest tests/test_long.py   # each way's speeds, and a stretched model against the whole sequence
 ```
 
 ## Docs

@@ -94,3 +94,5 @@ Both training runs log to TensorBoard, under `runs/`.
   generated questions, fine-tuning with the results masked out, and the calls measured, the calculator on and off.
 - [An agent, with subagents](agent.md): one model in three roles, files in a sandbox, subagents in fresh
   contexts, and the agent against one context on a long task, then in a chat.
+- [A longer context](long-context.md): the web model's rotary embeddings stretched to four times its
+  window, four ways, measured by position and with a pass key, then fifteen minutes of fine-tuning.
