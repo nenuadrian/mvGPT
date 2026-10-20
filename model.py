@@ -1,5 +1,5 @@
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 import torch
 import torch.nn as nn
@@ -24,6 +24,8 @@ class GPTConfig:
     dropout: float = 0.1
     bias: bool = True
     rope: bool = False  # rotary position embeddings, instead of a learned embedding per position
+    rope_scaling: str | None = None  # rotations stretched past the window trained on: "pi", "ntk", "parts" or "yarn"
+    rope_factor: float = 1.0  # by how much: the window trained on is block_size / rope_factor
     causal: bool = True  # each token sees the ones before it; for diffusion (diffusion.py), all of them
     rmsnorm: bool = False  # RMSNorm in place of LayerNorm: each token's channels rescaled, not centred
     swiglu: bool = False  # a gated MLP, SwiGLU, in place of GELU's
@@ -66,12 +68,45 @@ def kv_cache_bytes(config, tokens, bytes_per_number=4):
     return per_token * tokens * bytes_per_number
 
 
-def rotary(start, T, head_size, device):
-    # The angles for positions start to start + T - 1, one per pair of channels, as cosines and sines:
-    # they turn faster for the first pairs and slower for the last ones.
+SCALINGS = ("pi", "ntk", "parts", "yarn")
+# NTK-by-parts and YaRN: a pair of channels that turns more than 32 times in the window trained on keeps its
+# speed, one that turns less than once is slowed by the factor, and those in between are slowed by some.
+FAST_TURNS, SLOW_TURNS = 32, 1
+
+
+def rope_speeds(head_size, device, scaling=None, factor=1.0, trained=None):
+    # A speed for each pair of channels, in radians per position: faster for the first pairs, slower for the last.
     speeds = 10_000 ** (-torch.arange(0, head_size, 2, device=device) / head_size)
+    if scaling == "pi":
+        # Position interpolation: every pair slowed by the factor, so position 4,096 turns as far as 1,024 did.
+        return speeds / factor
+    if scaling == "ntk":
+        # NTK-aware: a bigger base, which leaves the fastest pair as it is and slows the slowest by the factor.
+        base = 10_000 * factor ** (head_size / (head_size - 2))
+        return base ** (-torch.arange(0, head_size, 2, device=device) / head_size)
+    if scaling in ("parts", "yarn"):
+        turns = trained * speeds / (2 * math.pi)  # in the window trained on
+        keep = ((turns - SLOW_TURNS) / (FAST_TURNS - SLOW_TURNS)).clamp(0, 1)
+        return keep * speeds + (1 - keep) * speeds / factor
+    return speeds
+
+
+def rotary(start, T, head_size, device, scaling=None, factor=1.0, trained=None):
+    # The angles for positions start to start + T - 1, one per pair of channels, as cosines and sines.
+    speeds = rope_speeds(head_size, device, scaling, factor, trained)
     angles = torch.arange(start, start + T, device=device)[:, None] * speeds
-    return angles.cos(), angles.sin()
+    cos, sin = angles.cos(), angles.sin()
+    if scaling == "yarn":
+        # YaRN's temperature: queries and keys both lengthened by m, so attention's scores grow by m squared,
+        # a sharper softmax over the longer context.
+        m = 0.1 * math.log(factor) + 1
+        cos, sin = cos * m, sin * m
+    return cos, sin
+
+
+def stretch(config, scaling, factor):
+    # The same weights, with a window factor times as long, and the rotations stretched to fit it.
+    return replace(config, block_size=int(config.block_size * factor), rope_scaling=scaling, rope_factor=factor)
 
 
 def rotate(x, cos, sin):
@@ -203,6 +238,8 @@ class Block(nn.Module):
 class GPT(nn.Module):
     def __init__(self, config):
         super().__init__()
+        if config.rope_scaling is not None and (not config.rope or config.rope_scaling not in SCALINGS):
+            raise ValueError(f"rope_scaling stretches rotary embeddings: one of {SCALINGS}, with rope=True")
         self.config = config
         self.embed_tokens = nn.Embedding(config.vocab_size, config.n_embd)
         # With rotary embeddings, attention handles positions, and there's no table of them.
@@ -242,8 +279,10 @@ class GPT(nn.Module):
         x = self.embed_tokens(idx)
         angles = None
         if self.config.rope:
-            # Computed once, for all the blocks.
-            angles = rotary(start, T, self.config.n_embd // self.config.n_head, idx.device)
+            # Computed once, for all the blocks. A stretched model was trained on a window rope_factor times shorter.
+            c = self.config
+            angles = rotary(start, T, c.n_embd // c.n_head, idx.device, c.rope_scaling, c.rope_factor,
+                            c.block_size / c.rope_factor)
         else:
             x = x + self.embed_positions(torch.arange(start, start + T, device=idx.device))
         x = self.drop(x)

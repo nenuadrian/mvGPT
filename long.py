@@ -9,9 +9,9 @@ from torch.nn import functional as F
 from checkpoint import load_checkpoint
 from data import DATA_DIR
 from hellaswag import RESULTS
-from model import pick_device
+from model import SCALINGS, pick_device, stretch
 
-FACTOR = 4  # pages four windows long
+FACTOR = 4  # pages four windows long, and a model trained on one window stretched to fit them
 PAGES = 64
 BIN = 256  # positions averaged together for each point of the results
 
@@ -62,18 +62,24 @@ def main():
     model, tokenizer, _ = load_checkpoint(args.checkpoint, args.device)
     model.eval()
     name = os.path.basename(os.path.dirname(args.checkpoint))
-    window = model.config.block_size  # the window it was trained on
+    trained = model.config
+    window = int(trained.block_size / trained.rope_factor)  # the window it was trained on
     length = int(window * args.factor)
     pages = long_pages(tokenizer, length, args.pages, args.device)
 
+    # The same weights each time, read with another config: a model trained on one window is stretched by
+    # each method, and one that was stretched and trained is measured as it is.
+    configs = {s or "none": stretch(trained, s, args.factor) for s in (None, *SCALINGS)}
+    if trained.rope_scaling:
+        configs = {trained.rope_scaling: trained}
     results = {"model": name, "window": window, "length": length, "pages": len(pages), "bin": BIN, "methods": {}}
     print(f"loss on {len(pages)} held-out pages of {length:,} tokens, by position\n")
     print(f"{'method':<16}" + "".join(f"{f'{a:,}-{a + window - 1:,}':>13}" for a in range(0, length, window)))
-    for method in ("window", "none"):
+    for method, config in {"window": trained, **configs}.items():
+        model.config = config
         if method == "window":
             losses = torch.stack([window_losses(model, ids, window) for ids in pages])
         else:
-            # The whole page at once: rotary embeddings turn by any position, but the model saw a window's worth.
             losses = torch.stack([full_losses(model, ids) for ids in pages])
         by_window = losses.view(len(pages), -1, window).mean(dim=(0, 2))
         results["methods"][method] = {
