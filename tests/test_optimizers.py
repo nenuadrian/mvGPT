@@ -1,5 +1,7 @@
+import pytest
 import torch
 
+from bakeoff import NAMES, make_optimizers
 from model import GPT, GPTConfig
 from optimizers import AdamW
 
@@ -45,3 +47,10 @@ def test_adams_first_step_moves_each_weight_by_the_learning_rate():
         moved = (p - b).abs()
         assert (moved <= 1e-3 * 1.001).all()
         assert torch.allclose(moved[p.grad.abs() > 1e-5], torch.tensor(1e-3), rtol=1e-2)
+
+
+@pytest.mark.parametrize("name", NAMES)
+def test_each_optimizer_in_the_bakeoff_lowers_the_loss(name):
+    model = tiny()
+    losses = train(model, make_optimizers(name, model, 1e-3), steps=20)
+    assert losses[-1] < losses[0] - 0.2
