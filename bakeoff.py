@@ -12,17 +12,18 @@ from checkpoint import RUNS
 from data import DATA_DIR, load_tokenizer
 from hellaswag import RESULTS
 from model import GPT, GPTConfig, pick_device
-from optimizers import AdamW, Lion
+from optimizers import AdamW, Lion, Sophia, curvature
 
 STEPS = 1000
 WARMUP = 100
 BATCH_SIZE = 48
 EVAL_EVERY = 100
 EVAL_BATCHES = 40  # held-out batches, one set for all the runs: 40 x 48 x 256 = 491,520 tokens
-NAMES = ("adamw", "lion")
+NAMES = ("adamw", "lion", "sophia")
+CURVATURE_EVERY = 10  # Sophia estimates the curvature once in ten steps, as in its paper
 
 
-def make_optimizers(name, model, lr):
+def make_optimizers(name, model, lr, tokens=BATCH_SIZE * 256):
     # Weight decay on the weight matrices, and not on the biases and the norms' gains, as in pretrain.py.
     decay = [p for p in model.parameters() if p.dim() >= 2]
     rest = [p for p in model.parameters() if p.dim() < 2]
@@ -31,6 +32,8 @@ def make_optimizers(name, model, lr):
         return [AdamW(groups, lr=lr)]
     if name == "lion":
         return [Lion(groups, lr=lr)]
+    if name == "sophia":
+        return [Sophia(groups, lr=lr, tokens=tokens)]
     raise ValueError(f"no optimizer called {name}: one of {NAMES}")
 
 
@@ -77,11 +80,13 @@ def main(name, lr, seed=0, steps=STEPS, device=None):
     config = GPTConfig(vocab_size=len(tokenizer), rope=True, dropout=0.0)
     torch.manual_seed(seed)
     model = GPT(config).to(device)
-    optimizers = make_optimizers(name, model, lr)
+    optimizers = make_optimizers(name, model, lr, BATCH_SIZE * config.block_size)
     train = batches(split["train"], torch.Generator().manual_seed(seed), config.block_size, device)
     # The held-out batches come from a seed of their own, so all the runs are measured on one set of tokens.
     held_out = batches(split["valid"], torch.Generator().manual_seed(1234), config.block_size, device)
     valid = [next(held_out) for _ in range(EVAL_BATCHES)]
+    # Sophia draws labels from the model's predictions, with a generator of its own, so the batches don't change.
+    sampler = torch.Generator(device=device).manual_seed(seed)
 
     run = f"{name}-{lr:g}-seed{seed}" + (f"-steps{steps}" if steps != STEPS else "")
     writer = SummaryWriter(os.path.join(RUNS, "bakeoff", run))
@@ -91,8 +96,13 @@ def main(name, lr, seed=0, steps=STEPS, device=None):
     def evaluate(step, lr_now, loss=None):
         evals.append({"step": step, "valid": held_out_loss(model, valid)})
         writer.add_scalar("loss/valid", evals[-1]["valid"], step)
+        clipped = ""
+        if name == "sophia":
+            # Its README tunes rho so that 50 to 90 percent of the weights' steps are clipped.
+            evals[-1]["clipped"] = optimizers[0].clipped()
+            clipped = f" | {evals[-1]['clipped']:.0%} clipped"
         print(f"step {step:>4} | held-out {evals[-1]['valid']:.3f}" + (f" | loss {loss:.3f}" if loss else "")
-              + f" | lr {lr_now:.1e} | {1000 * trained / max(step, 1):.0f} ms/step", flush=True)
+              + f" | lr {lr_now:.1e} | {1000 * trained / max(step, 1):.0f} ms/step" + clipped, flush=True)
 
     evaluate(0, learning_rate(0, lr, steps))
     for step in range(steps):
@@ -112,6 +122,8 @@ def main(name, lr, seed=0, steps=STEPS, device=None):
         between = time.time()
         for optimizer in optimizers:
             optimizer.step()
+        if name == "sophia" and (step + 1) % CURVATURE_EVERY == 0:
+            curvature(model, x, optimizers[0], sampler)
         sync(device)
         # The whole step's time, and the optimizer's share of it.
         trained += time.time() - start

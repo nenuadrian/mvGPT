@@ -3,7 +3,7 @@ import torch
 
 from bakeoff import NAMES, make_optimizers
 from model import GPT, GPTConfig
-from optimizers import AdamW, Lion
+from optimizers import AdamW, Lion, Sophia, curvature
 
 
 def tiny():
@@ -59,6 +59,36 @@ def test_lion_moves_each_weight_by_the_learning_rate_every_step():
             moved = (p - b).abs()
             # Up or down by the learning rate, or not at all where the gradient and the momentum are zero.
             assert torch.allclose(moved[moved > 0], torch.tensor(1e-3), rtol=1e-3)
+
+
+def test_sophia_moves_no_weight_further_than_the_learning_rate():
+    model = tiny()
+    optimizer = Sophia(model.parameters(), lr=1e-3, weight_decay=0.0, tokens=128)
+    for _ in range(5):
+        before = [p.detach().clone() for p in model.parameters()]
+        train(model, [optimizer], steps=1)
+        curvature(model, torch.randint(50, (4, 32)), optimizer, torch.Generator().manual_seed(0))
+        for p, b in zip(model.parameters(), before):
+            assert ((p - b).abs() <= 1e-3 * 1.001).all()
+
+
+def test_sophia_takes_a_newton_step_where_the_curvature_is_large():
+    # One weight, with a curvature so large that its step isn't clipped: the momentum over the curvature.
+    w = torch.nn.Parameter(torch.tensor([1.0]))
+    optimizer = Sophia([w], lr=1.0, betas=(0.5, 0.99), rho=0.05, weight_decay=0.0, tokens=100)
+    optimizer.state_of(w)["h"].fill_(4.0)
+    w.grad = torch.tensor([2.0])
+    optimizer.step()
+    m = 0.5 * 2.0
+    assert torch.isclose(w, torch.tensor([1.0 - m / (0.05 * 100 * 4.0)]))
+
+
+def test_the_curvature_estimate_is_positive():
+    model = tiny()
+    optimizer = Sophia(model.parameters())
+    curvature(model, torch.randint(50, (4, 32)), optimizer, torch.Generator().manual_seed(0))
+    hs = [optimizer.state_of(p)["h"] for p in model.parameters()]
+    assert all((h >= 0).all() for h in hs) and sum(h.sum() for h in hs) > 0
 
 
 @pytest.mark.parametrize("name", NAMES)
