@@ -90,3 +90,4 @@ nav:
   - Tool use, a calculator: tools.md
   - An agent, with subagents: agent.md
   - A longer context: long-context.md
+  - Optimizers: optimizers.md

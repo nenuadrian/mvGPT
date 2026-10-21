@@ -96,3 +96,5 @@ Both training runs log to TensorBoard, under `runs/`.
   contexts, and the agent against one context on a long task, then in a chat.
 - [A longer context](long-context.md): the web model's rotary embeddings stretched to four times its
   window, four ways, measured by position and with a pass key, then fifteen minutes of fine-tuning.
+- [Optimizers](optimizers.md): AdamW from scratch, then a fair race against Lion, Sophia and Muon on the
+  stories model, each with its own sweep of the learning rate, with seeds, AdamW's steps, time and memory.

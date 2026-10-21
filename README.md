@@ -71,6 +71,11 @@ python long.py checkpoints/pretrain-web/model.pt      # loss by position past th
 python passkey.py checkpoints/pretrain-web/model.pt   # a pass key hidden in filler, by length, for each way
 python long_train.py yarn 15                          # fine-tune at 4,096 tokens, stretched with yarn (or pi), for 15 minutes
 python -m pytest tests/test_long.py   # each way's speeds, and a stretched model against the whole sequence
+python bakeoff.py adamw 1.2e-3 2.4e-3 4.8e-3   # train the stories model 1,000 steps at each peak learning rate (or lion, sophia, muon)
+python bakeoff.py muon 4.8e-3 --seed 1          # another seed; --steps 2000 for another length
+python bakeoff_report.py                        # each optimizer's sweep, by learning rate
+python bakeoff_report.py --best                 # each at its best: the seeds, AdamW's steps, the time and the memory
+python -m pytest tests/test_optimizers.py   # ours against PyTorch's AdamW and Muon, and what each update does
 ```
 
 ## Docs
