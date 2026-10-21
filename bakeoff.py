@@ -12,14 +12,14 @@ from checkpoint import RUNS
 from data import DATA_DIR, load_tokenizer
 from hellaswag import RESULTS
 from model import GPT, GPTConfig, pick_device
-from optimizers import AdamW
+from optimizers import AdamW, Lion
 
 STEPS = 1000
 WARMUP = 100
 BATCH_SIZE = 48
 EVAL_EVERY = 100
 EVAL_BATCHES = 40  # held-out batches, one set for all the runs: 40 x 48 x 256 = 491,520 tokens
-NAMES = ("adamw",)
+NAMES = ("adamw", "lion")
 
 
 def make_optimizers(name, model, lr):
@@ -29,6 +29,8 @@ def make_optimizers(name, model, lr):
     groups = [{"params": decay}, {"params": rest, "weight_decay": 0.0}]
     if name == "adamw":
         return [AdamW(groups, lr=lr)]
+    if name == "lion":
+        return [Lion(groups, lr=lr)]
     raise ValueError(f"no optimizer called {name}: one of {NAMES}")
 
 

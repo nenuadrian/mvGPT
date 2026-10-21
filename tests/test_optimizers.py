@@ -3,7 +3,7 @@ import torch
 
 from bakeoff import NAMES, make_optimizers
 from model import GPT, GPTConfig
-from optimizers import AdamW
+from optimizers import AdamW, Lion
 
 
 def tiny():
@@ -47,6 +47,18 @@ def test_adams_first_step_moves_each_weight_by_the_learning_rate():
         moved = (p - b).abs()
         assert (moved <= 1e-3 * 1.001).all()
         assert torch.allclose(moved[p.grad.abs() > 1e-5], torch.tensor(1e-3), rtol=1e-2)
+
+
+def test_lion_moves_each_weight_by_the_learning_rate_every_step():
+    model = tiny()
+    optimizer = Lion(model.parameters(), lr=1e-3, weight_decay=0.0)
+    for _ in range(3):
+        before = [p.detach().clone() for p in model.parameters()]
+        train(model, [optimizer], steps=1)
+        for p, b in zip(model.parameters(), before):
+            moved = (p - b).abs()
+            # Up or down by the learning rate, or not at all where the gradient and the momentum are zero.
+            assert torch.allclose(moved[moved > 0], torch.tensor(1e-3), rtol=1e-3)
 
 
 @pytest.mark.parametrize("name", NAMES)
