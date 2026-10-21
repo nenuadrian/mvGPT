@@ -3,7 +3,7 @@ import torch
 
 from bakeoff import NAMES, make_optimizers
 from model import GPT, GPTConfig
-from optimizers import AdamW, Lion, Sophia, curvature
+from optimizers import AdamW, Lion, Muon, Sophia, curvature, orthogonalize
 
 
 def tiny():
@@ -89,6 +89,33 @@ def test_the_curvature_estimate_is_positive():
     curvature(model, torch.randint(50, (4, 32)), optimizer, torch.Generator().manual_seed(0))
     hs = [optimizer.state_of(p)["h"] for p in model.parameters()]
     assert all((h >= 0).all() for h in hs) and sum(h.sum() for h in hs) > 0
+
+
+def test_orthogonalize_keeps_the_singular_vectors_and_brings_the_values_near_1():
+    torch.manual_seed(0)
+    # A matrix whose singular values span from 0.1 to 10.
+    U, V = torch.linalg.qr(torch.randn(96, 32))[0], torch.linalg.qr(torch.randn(32, 32))[0]
+    G = U @ torch.diag(torch.logspace(-1, 1, 32)) @ V.T
+    D = U.T @ orthogonalize(G) @ V
+    # In G's singular vectors, the result is diagonal: G's directions, with new lengths.
+    assert (D - torch.diag(D.diagonal())).abs().max() < 1e-4
+    assert ((D.diagonal() > 0.6) & (D.diagonal() < 1.2)).all()
+
+
+def matrices(model):
+    return [p for block in model.blocks for p in block.parameters() if p.dim() == 2]
+
+
+def test_our_muon_steps_where_pytorchs_does():
+    ours, theirs = tiny(), tiny()
+    before = [p.detach().clone() for p in matrices(ours)]
+    train(ours, [Muon(matrices(ours), lr=1e-2, weight_decay=0.1)])
+    train(theirs, [torch.optim.Muon(matrices(theirs), lr=1e-2, weight_decay=0.1, adjust_lr_fn="match_rms_adamw")])
+    for a, b, start in zip(matrices(ours), matrices(theirs), before):
+        # PyTorch's runs Newton-Schulz in bfloat16, and ours in float32, so they agree to bfloat16's rounding.
+        ours_moved, theirs_moved = (a - start).flatten(), (b - start).flatten()
+        assert torch.cosine_similarity(ours_moved, theirs_moved, dim=0) > 0.99
+        assert torch.isclose(ours_moved.norm(), theirs_moved.norm(), rtol=0.05)
 
 
 @pytest.mark.parametrize("name", NAMES)

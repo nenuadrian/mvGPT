@@ -1,3 +1,5 @@
+import math
+
 import torch
 from torch.nn import functional as F
 
@@ -121,3 +123,41 @@ def curvature(model, x, optimizer, generator):
     optimizer.update_curvature()
     optimizer.zero_grad(set_to_none=True)
 
+
+def orthogonalize(G, steps=5):
+    # Newton-Schulz, as in Muon: G's singular values pushed towards 1, its singular vectors kept.
+    a, b, c = 3.4445, -4.7750, 2.0315
+    X = G / (G.norm() + 1e-7)  # now all the singular values are at most 1
+    tall = G.size(0) > G.size(1)
+    if tall:
+        X = X.T  # so X @ X.T is the smaller of the two products
+    for _ in range(steps):
+        A = X @ X.T
+        X = a * X + (b * A + c * A @ A) @ X
+    return X.T if tall else X
+
+
+class Muon(torch.optim.Optimizer):
+    # Muon (Jordan and others, 2024), for the blocks' weight matrices: the momentum, orthogonalized, so the
+    # step moves the weights as much in all directions.
+    def __init__(self, params, lr=6e-4, momentum=0.95, weight_decay=0.1):
+        super().__init__(params, dict(lr=lr, momentum=momentum, weight_decay=weight_decay))
+
+    @torch.no_grad()
+    def step(self):
+        for group in self.param_groups:
+            mu = group["momentum"]
+            for p in group["params"]:
+                if p.grad is None:
+                    continue
+                state = self.state[p]
+                if not state:
+                    # One number per weight: the momentum.
+                    state["m"] = torch.zeros_like(p)
+                m = state["m"]
+                m.mul_(mu).add_(p.grad, alpha=1 - mu)
+                # Nesterov momentum: the gradient blended with the momentum once more, a look ahead.
+                update = orthogonalize((1 - mu) * p.grad + mu * m)
+                p.mul_(1 - group["lr"] * group["weight_decay"])
+                # Moonshot's scale: an update the size of AdamW's, so lr and weight_decay mean what they do there.
+                p.sub_(group["lr"] * 0.2 * math.sqrt(max(p.shape)) * update)

@@ -12,14 +12,14 @@ from checkpoint import RUNS
 from data import DATA_DIR, load_tokenizer
 from hellaswag import RESULTS
 from model import GPT, GPTConfig, pick_device
-from optimizers import AdamW, Lion, Sophia, curvature
+from optimizers import AdamW, Lion, Muon, Sophia, curvature
 
 STEPS = 1000
 WARMUP = 100
 BATCH_SIZE = 48
 EVAL_EVERY = 100
 EVAL_BATCHES = 40  # held-out batches, one set for all the runs: 40 x 48 x 256 = 491,520 tokens
-NAMES = ("adamw", "lion", "sophia")
+NAMES = ("adamw", "lion", "sophia", "muon")
 CURVATURE_EVERY = 10  # Sophia estimates the curvature once in ten steps, as in its paper
 
 
@@ -34,6 +34,12 @@ def make_optimizers(name, model, lr, tokens=BATCH_SIZE * 256):
         return [Lion(groups, lr=lr)]
     if name == "sophia":
         return [Sophia(groups, lr=lr, tokens=tokens)]
+    if name == "muon":
+        # Muon for the blocks' weight matrices. The embedding, which is also the head, and the biases and
+        # gains stay with AdamW, at Muon's learning rate.
+        blocks = [p for block in model.blocks for p in block.parameters() if p.dim() == 2]
+        others = [p for p in decay if all(p is not q for q in blocks)]
+        return [Muon(blocks, lr=lr), AdamW([{"params": others}, {"params": rest, "weight_decay": 0.0}], lr=lr)]
     raise ValueError(f"no optimizer called {name}: one of {NAMES}")
 
 
