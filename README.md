@@ -9,6 +9,40 @@ It's the code of the YouTube series [Minimum Viable GPT](https://mvgpt.nenuadria
 it on camera, one tagged step at a time (`ep001/step-1`, ...), and then takes it through the
 training pipeline of a language model. The docs are at <https://nenuadrian.github.io/mvGPT/>.
 
+<!-- notebooks -->
+## Each episode in Colab
+
+A notebook for each episode runs its commands on its code, as the episode left it (its
+`epNNN/end` tag), on a Colab GPU. Models from earlier episodes come from
+[the Hub](https://huggingface.co/nenuadrian/mvGPT-checkpoints), the files the videos used.
+
+| | Episode | |
+|---|---|---|
+| 1 | [Build a GPT from scratch in PyTorch](https://youtu.be/Vff1s2GzI_o) | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/nenuadrian/mvGPT/blob/main/notebooks/ep001-architecture.ipynb) |
+| 2 | [Pretraining a GPT from scratch in PyTorch](https://youtu.be/KA0aVTQ5Wak) | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/nenuadrian/mvGPT/blob/main/notebooks/ep002-pretraining.ipynb) |
+| 3 | [SFT: fine-tuning a GPT to follow instructions](https://youtu.be/WUsVr66Bgq0) | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/nenuadrian/mvGPT/blob/main/notebooks/ep003-sft.ipynb) |
+| 4 | [KV cache from scratch in PyTorch](https://youtu.be/JPlzOZouQxQ) | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/nenuadrian/mvGPT/blob/main/notebooks/ep004-kv-cache.ipynb) |
+| 5 | [Deploy a GPT: Hugging Face, Gradio, a browser](https://youtu.be/rn72Y_9dVE0) | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/nenuadrian/mvGPT/blob/main/notebooks/ep005-deploy.ipynb) |
+| 6 | [Profiling a GPT with PyTorch's profiler](https://youtu.be/7C0USj9KtI0) | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/nenuadrian/mvGPT/blob/main/notebooks/ep006-profiling.ipynb) |
+| 7 | [DPO: teaching a GPT from preferences](https://youtu.be/aQ4WxQfB2S4) | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/nenuadrian/mvGPT/blob/main/notebooks/ep007-dpo.ipynb) |
+| 8 | [PPO: reinforcement learning for a GPT](https://youtu.be/8ewa70rUPME) | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/nenuadrian/mvGPT/blob/main/notebooks/ep008-ppo.ipynb) |
+| 9 | [LoRA: fine-tuning a GPT with 2% of its weights](https://youtu.be/m5THIkAJJFk) | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/nenuadrian/mvGPT/blob/main/notebooks/ep009-lora.ipynb) |
+| 10 | [RoPE: rotary position embeddings from scratch](https://youtu.be/CVeEPW67Gv8) | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/nenuadrian/mvGPT/blob/main/notebooks/ep010-rope.ipynb) |
+| 11 | [BPE in C++: a byte-level tokenizer for a GPT](https://youtu.be/_o0mJYWdKQQ) | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/nenuadrian/mvGPT/blob/main/notebooks/ep011-bpe.ipynb) |
+| 12 | [Distributed training in PyTorch: 4 GPUs, DDP](https://youtu.be/5-RJVvuGZyE) | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/nenuadrian/mvGPT/blob/main/notebooks/ep012-distributed.ipynb) |
+| 13 | [Flash attention from scratch: PyTorch, Triton](https://youtu.be/HEYzYWquKos) | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/nenuadrian/mvGPT/blob/main/notebooks/ep013-flash-attention.ipynb) |
+| 14 | [Batching: serving a GPT to many users at once](https://youtu.be/6XGhd_83uwU) | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/nenuadrian/mvGPT/blob/main/notebooks/ep014-serving.ipynb) |
+| 15 | [Text diffusion: a GPT that writes all at once](https://youtu.be/LVWHstzgqE4) | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/nenuadrian/mvGPT/blob/main/notebooks/ep015-diffusion.ipynb) |
+| 16 | [GRPO: reinforcement learning without a critic](https://youtu.be/SoFl6r8Qz-0) | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/nenuadrian/mvGPT/blob/main/notebooks/ep016-grpo.ipynb) |
+| 17 | [RMSNorm, SwiGLU, QK-norm: a modern GPT block](https://youtu.be/cPiQO4AilGY) | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/nenuadrian/mvGPT/blob/main/notebooks/ep017-modern-block.ipynb) |
+| 18 | [Grouped-query attention: a smaller KV cache](https://youtu.be/SpKMenz36TM) | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/nenuadrian/mvGPT/blob/main/notebooks/ep018-gqa.ipynb) |
+| 19 | [Pretraining on the web: a GPT overnight](https://youtu.be/15vafg1wdpI) | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/nenuadrian/mvGPT/blob/main/notebooks/ep019-web.ipynb) |
+| 20 | [LLM tool calling from scratch: a calculator](https://youtu.be/UrlqjWEuYH4) | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/nenuadrian/mvGPT/blob/main/notebooks/ep020-tools.ipynb) |
+| 21 | [AI agent from scratch, with subagents](https://youtu.be/9SYXGDioA6g) | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/nenuadrian/mvGPT/blob/main/notebooks/ep021-agent.ipynb) |
+| 22 | [Long context LLM: stretching RoPE with YaRN](https://youtu.be/2C2JYv2agzo) | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/nenuadrian/mvGPT/blob/main/notebooks/ep022-long-context.ipynb) |
+| 23 | [Muon vs AdamW, Lion and Sophia: a fair race](https://youtu.be/0ysdFCrmdlU) | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/nenuadrian/mvGPT/blob/main/notebooks/ep023-optimizers.ipynb) |
+<!-- /notebooks -->
+
 ## Run it
 
 ```bash
