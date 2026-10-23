@@ -1,7 +1,11 @@
+import random
+
 import pytest
 
 import graph
+import graph_data
 from graph import generate_with_graph, literal, result_text
+from graph_data import Maker, read_facts
 from test_tools import Scripted
 from tokenizer import BPETokenizer
 
@@ -29,6 +33,35 @@ def test_long_answers_are_counted():
 def test_quotes():
     assert literal("Red fox") == "'Red fox'"
     assert literal("Finsch's Francolin") == '"Finsch\'s Francolin"'
+
+
+def test_reads_facts(tmp_path):
+    facts = tmp_path / "facts.txt"
+    facts.write_text("# A comment\n"
+                     "(Canidae:Family {taxon: 'Canidae'})\n"
+                     "(Finsch's Francolin:Species {taxon: 'Scleroptila finschi', status: 'least concern', weight_g: 410})\n"
+                     "(Iiwi:Species {weight_g: 17.5})\n"
+                     "(Finsch's Francolin)-[:PARENT_TAXON]->(Canidae)\n")
+    nodes, parent = read_facts(facts)
+    assert nodes["Finsch's Francolin"] == ("Species", {"taxon": "Scleroptila finschi", "status": "least concern",
+                                                      "weight_g": 410})
+    assert nodes["Iiwi"][1]["weight_g"] == 17.5
+    assert parent == {"Finsch's Francolin": "Canidae"}
+    facts.write_text("Red fox eats rabbits\n")
+    with pytest.raises(ValueError):
+        read_facts(facts)
+
+
+def test_a_species_the_graph_hasnt_got(monkeypatch):
+    monkeypatch.setattr(graph_data, "run_query", lambda cypher, server: "nothing")
+    maker = Maker({}, {}, random.Random(0))
+    e = maker.property("status", "Komodo dragon")
+    assert e["kind"] == "missing"
+    assert e["cypher"] == "MATCH (s:Species {name: 'Komodo dragon'}) RETURN s.status"
+    assert e["segments"][-1][0] == ". The graph has no species called Komodo dragon.<|endoftext|>"
+    # A species it has gets its answer.
+    monkeypatch.setattr(graph_data, "run_query", lambda cypher, server: "Felidae")
+    assert maker.rank("family", "Tiger")["segments"][-1][0] == ". The Tiger is in the family Felidae.<|endoftext|>"
 
 
 def test_the_answer_goes_in_after_the_query(monkeypatch):
