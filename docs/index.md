@@ -98,3 +98,5 @@ Both training runs log to TensorBoard, under `runs/`.
   window, four ways, measured by position and with a pass key, then fifteen minutes of fine-tuning.
 - [Optimizers](optimizers.md): AdamW from scratch, then a fair race against Lion, Sophia and Muon on the
   stories model, each with its own sweep of the learning rate, with seeds, AdamW's steps, time and memory.
+- [A graph database, smollerGraph](graph.md): the mammals and birds on Wikidata, in the database built in
+  smollerGraph's series, asked in Cypher, questions answered by the graph, and the queries measured, the graph on and off.

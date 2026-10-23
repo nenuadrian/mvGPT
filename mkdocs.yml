@@ -91,3 +91,4 @@ nav:
   - An agent, with subagents: agent.md
   - A longer context: long-context.md
   - Optimizers: optimizers.md
+  - A graph database, smollerGraph: graph.md

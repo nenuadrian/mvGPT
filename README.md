@@ -110,6 +110,11 @@ python bakeoff.py muon 4.8e-3 --seed 1          # another seed; --steps 2000 for
 python bakeoff_report.py                        # each optimizer's sweep, by learning rate
 python bakeoff_report.py --best                 # each at its best: the seeds, AdamW's steps, the time and the memory
 python -m pytest tests/test_optimizers.py   # ours against PyTorch's AdamW and Muon, and what each update does
+python graph_data.py ../smollerGraph/data/wikidata.txt   # 30,000 questions answered by smollerGraph's sg serve, and four held-out sets
+python graph_sft.py 20   # fine-tune the agent to ask it in Cypher, for 20 minutes
+python graph_eval.py checkpoints/graph/model.pt   # the queries, right and with the graph off
+python graph.py checkpoints/graph/model.pt "What family is the Red fox in?"
+python -m pytest tests/test_graph.py   # the answers as text, the quotes, the loop, and the questions
 ```
 
 ## Docs
