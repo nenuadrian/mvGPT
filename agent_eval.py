@@ -39,7 +39,8 @@ def attempt(agent_for, example, role=None):
         runs = all_runs(run)
         return {"kind": example["kind"], "right": files_right and answer_right, "calls": len(run.calls),
                 "subagents": len(runs) - 1, "tokens": run.tokens, "largest": max(r.tokens for r in runs),
-                "all_tokens": sum(r.tokens for r in runs), "trace": show(run)}
+                "all_tokens": sum(r.tokens for r in runs), "trace": show(run),
+                "asked": [(call, result) for call, result, _ in run.calls]}
     finally:
         shutil.rmtree(folder)
 
