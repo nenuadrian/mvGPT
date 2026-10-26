@@ -184,7 +184,8 @@ class Maker:
         kind = self.rng.choice([*RANKS, "status", "weight", "taxon"])
         return self.rank(kind, name) if kind in RANKS else self.property(kind, name)
 
-    def rank(self, kind, name=None):
+    def rank(self, kind, name=None, wording=None):
+        # wording: one way of asking, in place of a random one, as the agent asks its graph subagent.
         name = name or self.rng.choice(self.ranked)
         label, hops = RANKS[kind]
         v = label[0].lower()
@@ -194,9 +195,9 @@ class Maker:
             final = lambda r: f"{a['The']}{name} is a {CLASSES[r]}, in the class {r}."
         else:
             final = lambda r: f"{a['The']}{name} is in the {kind} {r}."
-        return self.trace(kind, self.wording(kind).format(**a), cypher, final, name)
+        return self.trace(kind, (wording or self.wording(kind)).format(**a), cypher, final, name)
 
-    def property(self, kind, name=None):
+    def property(self, kind, name=None, wording=None):
         if name is None and kind == "weight":
             # Most species have no weight on Wikidata: some questions about those, so the model says it doesn't know.
             name = self.rng.choice(self.weighed if self.rng.random() < 0.7 else self.species)
@@ -212,7 +213,7 @@ class Maker:
                                  else f"{The}{name} weighs about {r} grams."),
             "taxon": lambda r: f"The scientific name of {the}{name} is {r}.",
         }[kind]
-        return self.trace(kind, self.wording(kind).format(**a), cypher, final, name)
+        return self.trace(kind, (wording or self.wording(kind)).format(**a), cypher, final, name)
 
     def listing(self):
         group = self.rng.choice(self.groups)
