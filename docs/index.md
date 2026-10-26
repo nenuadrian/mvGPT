@@ -100,3 +100,5 @@ Both training runs log to TensorBoard, under `runs/`.
   stories model, each with its own sweep of the learning rate, with seeds, AdamW's steps, time and memory.
 - [A graph database, smollerGraph](graph.md): the mammals and birds on Wikidata, in the database built in
   smollerGraph's series, asked in Cypher, questions answered by the graph, and the queries measured, the graph on and off.
+- [The agent asks the graph](graph-agent.md): the graph as a fourth role of the agent, which hands back its
+  sentence, tasks that combine facts from the graph with the calculator, and what the new role cost the old ones.

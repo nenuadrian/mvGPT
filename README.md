@@ -116,6 +116,11 @@ python graph_sft.py 20   # fine-tune the agent to ask it in Cypher, for 20 minut
 python graph_eval.py checkpoints/graph/model.pt   # the queries, right and with the graph off
 python graph.py checkpoints/graph/model.pt "What family is the Red fox in?"
 python -m pytest tests/test_graph.py   # the answers as text, the quotes, the loop, and the questions
+python graph_agent_data.py ../smollerGraph/data/wikidata.txt   # the agent's tasks that ask the graph, with episode 21's (run agent_data.py first)
+python graph_agent_sft.py 30   # fine-tune episode 24's model into the agent with a graph role, for 30 minutes
+python graph_agent_eval.py checkpoints/graph-agent/model.pt   # the new tasks, the graph role on its own, and episode 21's tasks
+python agent.py checkpoints/graph-agent/model.pt "How much heavier is the Okapi than the Baikal Seal?"
+python -m pytest tests/test_agent.py tests/test_graph_agent.py   # the graph role, and each task replayed through the agent
 ```
 
 ## Docs
