@@ -1,5 +1,6 @@
 import torch
 
+import agent as agent_module
 from agent import MAX_CALLS, Agent, Sandbox
 from model import GPTConfig
 from tokenizer import BPETokenizer
@@ -91,3 +92,33 @@ def test_a_model_that_loops_is_stopped(tmp_path):
     a, _ = agent(tmp_path, {"math": [" <<calc 1 + 1>>" * (MAX_CALLS + 2) + ". 2."]})
     results = [r for _, r, _ in a.run("math", "1 + 1", max_new_tokens=400).calls]
     assert results[:MAX_CALLS] == ["2"] * MAX_CALLS and results[MAX_CALLS:] == ["error: too many calls"] * 2
+
+
+def test_a_graph_subagent_hands_back_its_sentence(tmp_path, monkeypatch):
+    listed = "Tiger, Lion, Jaguar, Leopard, Cheetah and 3 more"
+    monkeypatch.setattr(agent_module, "run_query", lambda cypher, server: listed)
+    scripts = {"agent": [" <<ask graph: Which species in Felidae are vulnerable?>>. Done."],
+               "graph": [" <<cypher MATCH (s) RETURN s.name>>. The vulnerable species in Felidae are Tiger, Lion, "
+                         "Jaguar, Leopard, Cheetah and 3 more."]}
+    a, _ = agent(tmp_path, scripts)
+    (call, answer, sub), = a.run("agent", "Which species in Felidae are vulnerable?").calls
+    # The whole sentence, not the 3 of "and 3 more", which a math or files subagent would hand back.
+    assert sub.role == "graph" and sub.calls[0][1].endswith("and 3 more")
+    assert answer == "The vulnerable species in Felidae are Tiger, Lion, Jaguar, Leopard, Cheetah and 3 more"
+
+
+def test_the_graph_role_keeps_to_cypher(tmp_path, monkeypatch):
+    monkeypatch.setattr(agent_module, "run_query", lambda cypher, server: "157000")
+    scripts = {"agent": [" <<cypher MATCH (s) RETURN s.weight_g>>. <<ask graph: How heavy is the Lion?>>. Done."],
+               "graph": [" <<calc 1 + 1>>. <<cypher MATCH (s) RETURN s.weight_g>>. The Lion weighs about 157000 grams."]}
+    a, _ = agent(tmp_path, scripts)
+    run = a.run("agent", "How heavy is the Lion?")
+    assert run.calls[0][1] == "error: no such tool"  # the agent asks the graph; it doesn't query it itself
+    sub = run.calls[1][2]
+    assert [r for _, r, _ in sub.calls] == ["error: no such tool", "157000"]  # and the graph has no calculator
+    assert run.calls[1][1] == "The Lion weighs about 157000 grams"
+
+
+def test_the_prompts_list_the_graph():
+    assert agent_module.prompt("agent", "Hi.").split("\n")[1] == "Tools: ask math, ask files, ask graph, write, list"
+    assert agent_module.prompt("graph", "Hi.").split("\n")[1] == "Tools: cypher"

@@ -4,15 +4,17 @@ from dataclasses import dataclass, field
 
 import torch
 
+from graph import SERVER, run_query
 from model import KVCache
 from tools import calculate
 
-# One model, three roles. A role is a line at the top of the prompt, with the tools it may call: the agent
-# delegates to the other two, each of which works in a context of its own and hands back its answer.
+# One model, four roles. A role is a line at the top of the prompt, with the tools it may call: the agent
+# delegates to the other three, each of which works in a context of its own and hands back its answer.
 ROLES = {
-    "agent": ["ask math", "ask files", "write", "list"],
+    "agent": ["ask math", "ask files", "ask graph", "write", "list"],
     "math": ["calc"],
     "files": ["read", "write", "list", "calc"],
+    "graph": ["cypher"],
 }
 MAX_DEPTH = 1  # a subagent can't ask for subagents of its own
 MAX_CALLS = 10  # per context: a model that loops gets stopped
@@ -84,14 +86,19 @@ class Run:
 
     @property
     def answer(self):
-        # What a subagent hands back: the first number of its final sentence, or the sentence with no number.
+        # What a subagent hands back. The graph hands back its sentence whole: its facts are names as often as
+        # numbers, and the 3 in a list's "and 3 more" isn't the answer.
+        if self.role == "graph":
+            return self.final.rstrip(".")
+        # Math and files: the first number of the final sentence, or the sentence with no number.
         number = NUMBER.search(self.final)
         return number.group(0) if number else self.final.rstrip(".")
 
 
 class Agent:
-    def __init__(self, model, tokenizer, sandbox, on_event=None):
+    def __init__(self, model, tokenizer, sandbox, on_event=None, server=SERVER):
         self.model, self.tokenizer, self.sandbox = model, tokenizer, sandbox
+        self.server = server  # where sg serve is listening, for the graph's queries
         # Called with each step, for the app to show: ("start", run), ("call", run, call, result), ("end", run).
         self.on_event = on_event or (lambda *event: None)
 
@@ -107,6 +114,9 @@ class Agent:
             return "error: too many calls", None
         if name == "calc":
             return calculate(rest, longest=LONGEST_SUM), None
+        if name == "cypher":
+            # Episode 24's query, as plain text, to sg serve, which can only read.
+            return run_query(rest.strip(), self.server), None
         if name == "list":
             return self.sandbox.list(), None
         if name == "read":
@@ -184,11 +194,12 @@ def main():
     parser.add_argument("--role", default="agent", choices=list(ROLES))
     parser.add_argument("--folder", default="sandbox", help="the files the model can see")
     parser.add_argument("--files", help='files to start with, as JSON: {"jan.txt": "12, 30, 8"}')
+    parser.add_argument("--server", default=SERVER, help="where sg serve is listening, for the graph role")
     args = parser.parse_args()
 
     model, tokenizer, _ = load_checkpoint(args.checkpoint, pick_device())
     sandbox = Sandbox(args.folder, json.loads(args.files) if args.files else None)
-    run = Agent(model, tokenizer, sandbox).run(args.role, args.task)
+    run = Agent(model, tokenizer, sandbox, server=args.server).run(args.role, args.task)
     print(show(run))
     print(f"files: {sandbox.list()}")
 
