@@ -42,6 +42,7 @@ A notebook for each episode runs its commands on its code, as the episode left i
 | 22 | [Long context LLM: stretching RoPE with YaRN](https://youtu.be/2C2JYv2agzo) | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/nenuadrian/mvGPT/blob/main/notebooks/ep022-long-context.ipynb) |
 | 23 | [Muon vs AdamW, Lion and Sophia: a fair race](https://youtu.be/0ysdFCrmdlU) | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/nenuadrian/mvGPT/blob/main/notebooks/ep023-optimizers.ipynb) |
 | 24 | [Text to Cypher: our GPT asks a graph database](https://youtu.be/NxeRk1Q8LXY) | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/nenuadrian/mvGPT/blob/main/notebooks/ep024-knowledge-graph.ipynb) |
+| 25 | [AI agent: a graph database and a calculator](https://youtu.be/MeQ2iTAjobQ) | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/nenuadrian/mvGPT/blob/main/notebooks/ep025-graph-agent.ipynb) |
 <!-- /notebooks -->
 
 ## Run it
