@@ -104,3 +104,5 @@ Both training runs log to TensorBoard, under `runs/`.
   sentence, tasks that combine facts from the graph with the calculator, and what the new role cost the old ones.
 - [Constrained decoding](constrained-decoding.md): the graph role's names kept to a list by a mask on the
   logits, with two tries walked a byte at a time, the graph's names against the task's words, and both measured.
+- [Speculative decoding](speculative-decoding.md): what a pass costs by its tokens, a draft's guesses checked in the
+  pass that writes each token, prompt lookup and a small draft model, and the agent's tasks timed with each.

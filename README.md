@@ -126,6 +126,11 @@ python constrain.py checkpoints/graph-agent/model.pt "How much does the Okapi we
 python agent.py checkpoints/graph-agent/model.pt "Are the Okapi and the Giraffe in the same family?" --names task   # or --names graph --facts ...
 python constrain_eval.py checkpoints/graph-agent/model.pt ../smollerGraph/data/wikidata.txt   # the graph role three ways, and the agent two
 python -m pytest tests/test_constrain.py   # the tokens a name allows, the quotes, a name in bytes, and the mask
+python speculative_bench.py checkpoints/graph-agent/model.pt   # a forward pass's time by its tokens, on the GPU and the CPU
+python speculative.py checkpoints/graph-agent/model.pt "How much does the King Penguin weigh?" --draft lookup   # a pass a line
+python draft_sft.py 30   # a small draft model, trained on the agent's tasks for 30 minutes
+python speculative_eval.py checkpoints/graph-agent/model.pt checkpoints/draft/model.pt   # the agent's tasks with each draft
+python -m pytest tests/test_speculative.py   # greedy decoding's text with each draft, lookup, the trimmed cache
 ```
 
 ## Docs
