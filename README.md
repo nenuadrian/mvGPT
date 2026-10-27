@@ -122,6 +122,10 @@ python graph_agent_sft.py 30   # fine-tune episode 24's model into the agent wit
 python graph_agent_eval.py checkpoints/graph-agent/model.pt   # the new tasks, the graph role on its own, and episode 21's tasks
 python agent.py checkpoints/graph-agent/model.pt "How much heavier is the Okapi than the Baikal Seal?"
 python -m pytest tests/test_agent.py tests/test_graph_agent.py   # the graph role, and each task replayed through the agent
+python constrain.py checkpoints/graph-agent/model.pt "How much does the Okapi weigh?"   # the query's name a step at a time, copied from the task
+python agent.py checkpoints/graph-agent/model.pt "Are the Okapi and the Giraffe in the same family?" --names task   # or --names graph --facts ...
+python constrain_eval.py checkpoints/graph-agent/model.pt ../smollerGraph/data/wikidata.txt   # the graph role three ways, and the agent two
+python -m pytest tests/test_constrain.py   # the tokens a name allows, the quotes, a name in bytes, and the mask
 ```
 
 ## Docs

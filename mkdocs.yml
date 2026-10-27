@@ -93,3 +93,4 @@ nav:
   - Optimizers: optimizers.md
   - A graph database, smollerGraph: graph.md
   - The agent asks the graph: graph-agent.md
+  - Constrained decoding: constrained-decoding.md

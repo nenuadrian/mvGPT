@@ -102,3 +102,5 @@ Both training runs log to TensorBoard, under `runs/`.
   smollerGraph's series, asked in Cypher, questions answered by the graph, and the queries measured, the graph on and off.
 - [The agent asks the graph](graph-agent.md): the graph as a fourth role of the agent, which hands back its
   sentence, tasks that combine facts from the graph with the calculator, and what the new role cost the old ones.
+- [Constrained decoding](constrained-decoding.md): the graph role's names kept to a list by a mask on the
+  logits, with two tries walked a byte at a time, the graph's names against the task's words, and both measured.
