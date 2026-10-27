@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 
 import torch
 
+from constrain import pick, written
 from graph import SERVER, run_query
 from model import KVCache
 from tools import calculate
@@ -96,9 +97,11 @@ class Run:
 
 
 class Agent:
-    def __init__(self, model, tokenizer, sandbox, on_event=None, server=SERVER):
+    def __init__(self, model, tokenizer, sandbox, on_event=None, server=SERVER, constrain=None):
         self.model, self.tokenizer, self.sandbox = model, tokenizer, sandbox
         self.server = server  # where sg serve is listening, for the graph's queries
+        # What a context may write, from its role and task: a constraint, or None, to write freely.
+        self.constrain = constrain or (lambda role, task: None)
         # Called with each step, for the app to show: ("start", run), ("call", run, call, result), ("end", run).
         self.on_event = on_event or (lambda *event: None)
 
@@ -141,13 +144,15 @@ class Agent:
         model.eval()
         run = Run(role, task, depth)
         self.on_event("start", run)
+        constraint = self.constrain(role, task)
         device = next(model.parameters()).device
         ids = tokenizer.encode(prompt(role, task))
         cache = KVCache(model.config.n_layer)
         logits, _ = model(torch.tensor([ids], device=device), cache=cache)
         out, opened = [], None
         while len(out) < max_new_tokens and len(ids) + len(out) < model.config.block_size:
-            token = logits[0, -1].argmax().item()
+            allowed = constraint.allowed(written(tokenizer, out)) if constraint else None
+            token = pick(logits[0, -1], allowed)
             if token == tokenizer.eot_id:
                 break
             out.append(token)
@@ -186,6 +191,7 @@ def main():
     import json
 
     from checkpoint import load_checkpoint
+    from constrain import graph_names
     from model import pick_device
 
     parser = argparse.ArgumentParser(description="Give the agent a task, with a folder of files to work in.")
@@ -195,11 +201,13 @@ def main():
     parser.add_argument("--folder", default="sandbox", help="the files the model can see")
     parser.add_argument("--files", help='files to start with, as JSON: {"jan.txt": "12, 30, 8"}')
     parser.add_argument("--server", default=SERVER, help="where sg serve is listening, for the graph role")
+    parser.add_argument("--facts", help="smollerGraph's facts file: the graph role's queries name what's in it")
     args = parser.parse_args()
 
     model, tokenizer, _ = load_checkpoint(args.checkpoint, pick_device())
     sandbox = Sandbox(args.folder, json.loads(args.files) if args.files else None)
-    run = Agent(model, tokenizer, sandbox, server=args.server).run(args.role, args.task)
+    constrain = graph_names(tokenizer, args.facts) if args.facts else None
+    run = Agent(model, tokenizer, sandbox, server=args.server, constrain=constrain).run(args.role, args.task)
     print(show(run))
     print(f"files: {sandbox.list()}")
 

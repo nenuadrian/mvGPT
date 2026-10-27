@@ -2,6 +2,7 @@ import torch
 
 import agent as agent_module
 from agent import MAX_CALLS, Agent, Sandbox
+from constrain import Names, vocabulary
 from model import GPTConfig
 from tokenizer import BPETokenizer
 
@@ -117,6 +118,21 @@ def test_the_graph_role_keeps_to_cypher(tmp_path, monkeypatch):
     sub = run.calls[1][2]
     assert [r for _, r, _ in sub.calls] == ["error: no such tool", "157000"]  # and the graph has no calculator
     assert run.calls[1][1] == "The Lion weighs about 157000 grams"
+
+
+def test_a_graph_subagent_keeps_to_the_names(tmp_path, monkeypatch):
+    queries = []
+    monkeypatch.setattr(agent_module, "run_query", lambda cypher, server: queries.append(cypher) or "250000")
+    scripts = {"agent": [" <<ask graph: How much does the Okapi weigh?>>. Done."],
+               "graph": [" <<cypher MATCH (s:Species {name: 'Okapu'}) RETURN s.weight_g>>. The Okapi weighs about "
+                         "250000 grams."]}
+    tokenizer = BPETokenizer([])
+    names = Names(vocabulary(tokenizer), ["Okapi"])
+    a = Agent(Scripted(tokenizer, scripts), tokenizer, Sandbox(str(tmp_path)),
+              constrain=lambda role, task: names if role == "graph" else None)
+    a.run("agent", "How much does the Okapi weigh?")
+    # The model writes the u, and the constraint picks the i, the one token that keeps the name on the list.
+    assert queries == ["MATCH (s:Species {name: 'Okapi'}) RETURN s.weight_g"]
 
 
 def test_the_prompts_list_the_graph():
