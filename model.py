@@ -54,6 +54,13 @@ class KVCache:
         self.keys = [k[:, :, -keep:] for k in self.keys]
         self.values = [v[:, :, -keep:] for v in self.values]
 
+    def trim(self, n):
+        # Drop the newest n tokens' keys and values: the guesses speculative decoding didn't keep.
+        if n:
+            self.keys = [k[:, :, :-n] for k in self.keys]
+            self.values = [v[:, :, :-n] for v in self.values]
+            self.position -= n
+
     def update(self, layer, k, v):
         if self.keys[layer] is not None:
             k = torch.cat([self.keys[layer], k], dim=2)
