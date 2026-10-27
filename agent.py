@@ -97,11 +97,14 @@ class Run:
 
 
 class Agent:
-    def __init__(self, model, tokenizer, sandbox, on_event=None, server=SERVER, constrain=None):
+    def __init__(self, model, tokenizer, sandbox, on_event=None, server=SERVER, constrain=None, draft=None):
         self.model, self.tokenizer, self.sandbox = model, tokenizer, sandbox
         self.server = server  # where sg serve is listening, for the graph's queries
         # What a context may write, from its role and task: a constraint, or None, to write freely.
         self.constrain = constrain or (lambda role, task: None)
+        # Guesses at the next tokens, from speculative.py, which the model checks in the pass that writes each token,
+        # and how many it was given and kept.
+        self.draft, self.guessed, self.kept = draft, 0, 0
         # Called with each step, for the app to show: ("start", run), ("call", run, call, result), ("end", run).
         self.on_event = on_event or (lambda *event: None)
 
@@ -149,14 +152,15 @@ class Agent:
         ids = tokenizer.encode(prompt(role, task))
         cache = KVCache(model.config.n_layer)
         logits, _ = model(torch.tensor([ids], device=device), cache=cache)
-        out, opened = [], None
-        while len(out) < max_new_tokens and len(ids) + len(out) < model.config.block_size:
-            allowed = constraint.allowed(written(tokenizer, out)) if constraint else None
-            token = pick(logits[0, -1], allowed)
-            if token == tokenizer.eot_id:
-                break
+        after, out, opened = logits[0, -1], [], None
+
+        def allowed():
+            return constraint.allowed(written(tokenizer, out)) if constraint else None
+
+        def write(token):
+            """Writes a token, and runs the call it closes: returns the tool's result's tokens, or None."""
+            nonlocal opened
             out.append(token)
-            new = [token]
             text = tokenizer.decode(out)
             if opened is None and text.endswith("<<"):
                 opened = len(text)
@@ -167,10 +171,45 @@ class Agent:
                 self.on_event("call", run, call.strip(), result)
                 tool_ids = tokenizer.encode(f" = {result}")
                 out.extend(tool_ids)
-                new += tool_ids
+                return tool_ids
+            return None
+
+        done = False
+        while not done and len(out) < max_new_tokens and len(ids) + len(out) < model.config.block_size:
+            token = pick(after, allowed())
+            if token == tokenizer.eot_id:
+                break
+            tool_ids = write(token)
+            if tool_ids is not None:
+                # The token that closed the call and the tool's result go through the model together.
+                logits, _ = model(torch.tensor([[token] + tool_ids], device=device), cache=cache)
+                after = logits[0, -1]
+            else:
+                # The draft's guesses at the tokens after it go through the model with it, in one pass.
+                room = min(max_new_tokens - len(out), model.config.block_size - len(ids) - len(out))
+                guesses = self.draft.guess(ids + out)[:room] if self.draft else []
+                logits, _ = model(torch.tensor([[token] + guesses], device=device), cache=cache)
+                kept = 0
+                for guess in guesses:
+                    # A guess is kept while it's the token the model picks after the ones before it.
+                    if pick(logits[0, kept], allowed()) != guess:
+                        break
+                    kept += 1
+                    if guess == tokenizer.eot_id:
+                        done = True
+                        break
+                    tool_ids = write(guess)
+                    if tool_ids is not None:
+                        break
+                # The guesses it didn't keep come out of the cache, and a call's result goes in after the ones it did.
+                cache.trim(len(guesses) - kept)
+                self.guessed, self.kept = self.guessed + len(guesses), self.kept + kept
+                if tool_ids is not None:
+                    logits, _ = model(torch.tensor([tool_ids], device=device), cache=cache)
+                    after = logits[0, -1]
+                else:
+                    after = logits[0, kept]
             run.text, run.tokens = tokenizer.decode(out), len(ids) + len(out)
-            # The newest tokens, the tool's result included, through the model, with the cache for the rest.
-            logits, _ = model(torch.tensor([new], device=device), cache=cache)
         self.on_event("end", run)
         return run
 
@@ -193,6 +232,7 @@ def main():
     from checkpoint import load_checkpoint
     from constrain import graph_names, task_words
     from model import pick_device
+    from speculative import Draft, Lookup
 
     parser = argparse.ArgumentParser(description="Give the agent a task, with a folder of files to work in.")
     parser.add_argument("checkpoint")
@@ -204,6 +244,8 @@ def main():
     parser.add_argument("--names", choices=["task", "graph"],
                         help="keep the graph role's names to its task's words, or to the graph's, from --facts")
     parser.add_argument("--facts", help="smollerGraph's facts file, for --names graph")
+    parser.add_argument("--draft", help="guesses to check in each pass: lookup, or a small model's checkpoint")
+    parser.add_argument("-k", type=int, default=4, help="tokens the draft guesses in each pass")
     args = parser.parse_args()
 
     model, tokenizer, _ = load_checkpoint(args.checkpoint, pick_device())
@@ -213,9 +255,17 @@ def main():
         constrain = task_words(tokenizer)
     elif args.names == "graph":
         constrain = graph_names(tokenizer, args.facts)
-    run = Agent(model, tokenizer, sandbox, server=args.server, constrain=constrain).run(args.role, args.task)
+    draft = None
+    if args.draft == "lookup":
+        draft = Lookup(args.k)
+    elif args.draft:
+        draft = Draft(load_checkpoint(args.draft, pick_device())[0].eval(), args.k)
+    agent = Agent(model, tokenizer, sandbox, server=args.server, constrain=constrain, draft=draft)
+    run = agent.run(args.role, args.task)
     print(show(run))
     print(f"files: {sandbox.list()}")
+    if draft:
+        print(f"guesses kept: {agent.kept} of {agent.guessed}")
 
 
 if __name__ == "__main__":

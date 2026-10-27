@@ -4,6 +4,7 @@ import agent as agent_module
 from agent import MAX_CALLS, Agent, Sandbox
 from constrain import Names, vocabulary
 from model import GPTConfig
+from speculative import Draft, Lookup
 from tokenizer import BPETokenizer
 
 
@@ -138,3 +139,53 @@ def test_a_graph_subagent_keeps_to_the_names(tmp_path, monkeypatch):
 def test_the_prompts_list_the_graph():
     assert agent_module.prompt("agent", "Hi.").split("\n")[1] == "Tools: ask math, ask files, ask graph, write, list"
     assert agent_module.prompt("graph", "Hi.").split("\n")[1] == "Tools: cypher"
+
+
+class Positional:
+    """Stands in for the model, for speculative decoding: after its prompt, a context writes its role's script by
+    position, so a pass of several tokens writes what a pass of one would, and the script's tools' results line up
+    with the runtime's. It keeps the context's tokens on the cache, which a trim cuts back as it does the keys."""
+
+    def __init__(self, tokenizer, scripts):
+        self.tokenizer = tokenizer
+        self.scripts = {role: tokenizer.encode(text) + [tokenizer.eot_id] for role, text in scripts.items()}
+        self.config = GPTConfig(vocab_size=len(tokenizer), n_layer=1, block_size=1024)
+        self.param = torch.nn.Parameter(torch.zeros(1))
+        self.passes = 0
+
+    def parameters(self):
+        return iter([self.param])
+
+    def eval(self):
+        return self
+
+    def __call__(self, idx, cache):
+        self.passes += 1
+        new = idx[0].tolist()
+        if cache.position == 0:
+            role = self.tokenizer.decode(new).split("\n")[0][len("Role: "):]
+            cache.keys, cache.values, cache.script, cache.prompt = [], [], self.scripts[role], len(new)
+        logits = torch.full((1, len(new), self.config.vocab_size), -1e9)
+        for i in range(len(new)):
+            at = cache.position + i + 1 - cache.prompt  # the script's token after this position
+            logits[0, i, cache.script[at] if 0 <= at < len(cache.script) else self.tokenizer.eot_id] = 0
+        cache.position += len(new)
+        return logits, None
+
+
+def test_speculative_decoding_writes_what_greedy_does(tmp_path):
+    scripts = {"agent": " <<ask math: What is 37 * 24?>> = 888. The answer is 888.",
+               "math": " <<calc 37 * 24>> = 888. The answer is 888."}
+    tokenizer = BPETokenizer([])
+    runs = {}
+    for name in ("none", "lookup", "draft"):
+        model = Positional(tokenizer, scripts)
+        draft = {"none": None, "lookup": Lookup(k=4), "draft": Draft(Positional(tokenizer, scripts), k=4)}[name]
+        a = Agent(model, tokenizer, Sandbox(str(tmp_path / name)), draft=draft)
+        runs[name] = (a.run("agent", "What is 37 * 24?"), model.passes)
+    plain, passes = runs["none"]
+    for name in ("lookup", "draft"):
+        run, fewer = runs[name]
+        # The same text and calls, the subagent's too, in fewer of the model's passes.
+        assert run.text == plain.text and run.calls[0][2].text == plain.calls[0][2].text
+        assert fewer < passes
