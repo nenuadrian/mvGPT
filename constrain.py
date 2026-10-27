@@ -1,3 +1,5 @@
+import re
+
 import torch
 
 from graph_data import read_facts
@@ -96,6 +98,19 @@ def graph_names(tokenizer, facts):
     return lambda role, task: names if role == "graph" else None
 
 
+def task_words(tokenizer):
+    """The graph role's constraint: each name in its queries is copied from its task, a word or a run of words."""
+    vocab = vocabulary(tokenizer)
+    return lambda role, task: Names(vocab, runs(task)) if role == "graph" else None
+
+
+def runs(text):
+    # Each run of whole words, without the question mark or full stop after it: "the Okapi weigh?" gives "the",
+    # "the Okapi", "the Okapi weigh", "Okapi", "Okapi weigh" and "weigh".
+    words = [m.span() for m in re.finditer(r"\S+", text)]
+    return {text[start:end].rstrip("?.,!") for i, (start, _) in enumerate(words) for _, end in words[i:]}
+
+
 def written(tokenizer, ids):
     # The text so far as bytes, as the tries hold them: a token can end in the middle of a character, as é is two bytes.
     return b"".join(tokenizer.token_bytes[i] for i in ids)
@@ -119,15 +134,18 @@ def main():
     from model import KVCache, pick_device
 
     parser = argparse.ArgumentParser(description="Watch the graph role write a query, a token at a time, with its "
-                                                 "names kept to the graph's.")
+                                                 "names kept to a list.")
     parser.add_argument("checkpoint")
     parser.add_argument("task")
-    parser.add_argument("facts", help="smollerGraph's facts file, which sg serve has loaded")
+    parser.add_argument("--names", choices=["task", "graph"], default="task",
+                        help="the names allowed: the task's words, or the graph's, from --facts")
+    parser.add_argument("--facts", help="smollerGraph's facts file, which sg serve has loaded")
     args = parser.parse_args()
 
     model, tokenizer, _ = load_checkpoint(args.checkpoint, pick_device())
     model.eval()
-    constraint = graph_names(tokenizer, args.facts)("graph", args.task)
+    constrain = graph_names(tokenizer, args.facts) if args.names == "graph" else task_words(tokenizer)
+    constraint = constrain("graph", args.task)
     device = next(model.parameters()).device
     ids = tokenizer.encode(prompt("graph", args.task))
     cache = KVCache(model.config.n_layer)

@@ -1,6 +1,6 @@
 import torch
 
-from constrain import Names, pick, vocabulary
+from constrain import Names, pick, runs, task_words, vocabulary
 from tokenizer import BPETokenizer
 
 
@@ -58,6 +58,20 @@ def test_a_name_in_bytes():
     names = Names(vocabulary(tokenizer), ["Réunion Kestrel"])
     assert names.allowed("{name: 'R".encode()) == [0xC3]
     assert names.allowed("{name: 'R".encode() + b"\xc3") == [0xA9]
+
+
+def test_names_copied_from_the_task():
+    assert runs("How much does the Okapi weigh?") >= {"Okapi", "the Okapi", "Okapi weigh", "weigh"}
+    assert "St. Helena Plover" in runs("What family is the St. Helena Plover in?")
+    tokenizer = tokenizer_with("ak")
+    constrain = task_words(tokenizer)
+    assert constrain("agent", "How much does the Okapi weigh?") is None  # the graph role's alone
+    names = constrain("graph", "How much does the Okapi weigh?")
+    # A name the graph has but the task doesn't say, like the Oak Titmouse, can't be written.
+    assert texts(tokenizer, names.allowed(b"{name: 'O")) == ["k"]
+    # An animal the graph hasn't got can still be copied, for sg serve to find nothing.
+    names = constrain("graph", "How much does the Komodo dragon weigh?")
+    assert texts(tokenizer, names.allowed(b"{name: 'Komodo")) == [" ", "'"]
 
 
 def test_the_mask():

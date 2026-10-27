@@ -191,7 +191,7 @@ def main():
     import json
 
     from checkpoint import load_checkpoint
-    from constrain import graph_names
+    from constrain import graph_names, task_words
     from model import pick_device
 
     parser = argparse.ArgumentParser(description="Give the agent a task, with a folder of files to work in.")
@@ -201,12 +201,18 @@ def main():
     parser.add_argument("--folder", default="sandbox", help="the files the model can see")
     parser.add_argument("--files", help='files to start with, as JSON: {"jan.txt": "12, 30, 8"}')
     parser.add_argument("--server", default=SERVER, help="where sg serve is listening, for the graph role")
-    parser.add_argument("--facts", help="smollerGraph's facts file: the graph role's queries name what's in it")
+    parser.add_argument("--names", choices=["task", "graph"],
+                        help="keep the graph role's names to its task's words, or to the graph's, from --facts")
+    parser.add_argument("--facts", help="smollerGraph's facts file, for --names graph")
     args = parser.parse_args()
 
     model, tokenizer, _ = load_checkpoint(args.checkpoint, pick_device())
     sandbox = Sandbox(args.folder, json.loads(args.files) if args.files else None)
-    constrain = graph_names(tokenizer, args.facts) if args.facts else None
+    constrain = None
+    if args.names == "task":
+        constrain = task_words(tokenizer)
+    elif args.names == "graph":
+        constrain = graph_names(tokenizer, args.facts)
     run = Agent(model, tokenizer, sandbox, server=args.server, constrain=constrain).run(args.role, args.task)
     print(show(run))
     print(f"files: {sandbox.list()}")
