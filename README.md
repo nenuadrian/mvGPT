@@ -43,6 +43,9 @@ A notebook for each episode runs its commands on its code, as the episode left i
 | 23 | [Muon vs AdamW, Lion and Sophia: a fair race](https://youtu.be/0ysdFCrmdlU) | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/nenuadrian/mvGPT/blob/main/notebooks/ep023-optimizers.ipynb) |
 | 24 | [Text to Cypher: our GPT asks a graph database](https://youtu.be/NxeRk1Q8LXY) | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/nenuadrian/mvGPT/blob/main/notebooks/ep024-knowledge-graph.ipynb) |
 | 25 | [AI agent: a graph database and a calculator](https://youtu.be/MeQ2iTAjobQ) | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/nenuadrian/mvGPT/blob/main/notebooks/ep025-graph-agent.ipynb) |
+| 26 | [Constrained decoding: structured LLM output](https://youtu.be/KypK6nrP-nE) | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/nenuadrian/mvGPT/blob/main/notebooks/ep026-constrained-decoding.ipynb) |
+| 27 | [Speculative decoding from scratch](https://youtu.be/gyC0YdAOlio) | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/nenuadrian/mvGPT/blob/main/notebooks/ep027-speculative-decoding.ipynb) |
+| 28 | [Attention heads in our GPT, seen and tested](https://youtu.be/Lq4id0KSNWk) | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/nenuadrian/mvGPT/blob/main/notebooks/ep028-attention.ipynb) |
 <!-- /notebooks -->
 
 ## Run it
