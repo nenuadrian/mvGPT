@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Attention in mvGPT</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+:root { --bg: #101215; --panel: #171a1f; --line: #262a31; --text: #e8eaf0; --muted: #8a909c;
+        --accent: #9fb4ff; --mint: #a8e6ed; --mono: "JetBrains Mono", Menlo, Consolas, monospace;
+        --sans: "Space Grotesk", -apple-system, "Segoe UI", sans-serif; }
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text); font-family: var(--sans); }
+header { padding: 22px 32px 10px; display: flex; align-items: baseline; gap: 18px; }
+h1 { margin: 0; font-size: 26px; font-weight: 600; letter-spacing: -0.01em;
+     background: linear-gradient(90deg, var(--accent), #fff, var(--mint)); -webkit-background-clip: text; color: transparent; }
+.sub { color: var(--muted); font-size: 15px; }
+main { display: grid; grid-template-columns: minmax(0, 1fr) 470px; gap: 22px; padding: 10px 32px 28px; }
+.panel { background: var(--panel); border: 1px solid var(--line); padding: 18px 20px; }
+.label { font-size: 13px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 12px; }
+#text { font-family: var(--mono); font-size: 17px; line-height: 1.7; }
+.tok { display: inline-block; padding: 2px 3px; margin: 0 1px 18px; border: 1px solid transparent; cursor: pointer;
+       white-space: pre; position: relative; }
+.tok.nl { display: block; height: 0; padding: 0; margin: 0; border: 0; }
+.tok.picked { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.tok .w { position: absolute; left: 0; right: 0; top: calc(100% + 3px); font-size: 12px; line-height: 1; color: var(--mint);
+          text-align: center; pointer-events: none; }
+.controls { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 14px; }
+button { font: 13px var(--sans); color: var(--text); background: transparent; border: 1px solid var(--line);
+         padding: 6px 10px; cursor: pointer; }
+button.on { border-color: var(--accent); color: var(--accent); }
+#grid { display: grid; grid-template-columns: 26px repeat(12, 1fr); gap: 3px; align-items: center; }
+#grid .axis { font: 11px var(--mono); color: var(--muted); text-align: center; }
+.head { aspect-ratio: 1; width: 100%; border: 1px solid transparent; cursor: pointer; image-rendering: pixelated; }
+.head.picked { border-color: var(--accent); }
+#lens { font-family: var(--mono); font-size: 14px; display: grid; grid-template-columns: 70px 1fr 64px; gap: 4px 10px; }
+#lens .bar { height: 14px; background: var(--mint); opacity: 0.85; align-self: center; }
+#lens .layer { color: var(--muted); }
+.row { display: flex; gap: 22px; margin-top: 22px; }
+.row > .panel { flex: 1; }
+.note { color: var(--muted); font-size: 13px; margin-top: 10px; }
+</style></head><body>
+<header><h1>Attention in mvGPT</h1><span class="sub" id="what"></span></header>
+<main>
+  <div>
+    <div class="panel"><div class="label" id="text-label"></div><div id="text"></div>
+      <div class="note">Pick a token: the shading is how much of its attention goes to each token before it.</div></div>
+    <div class="panel" style="margin-top: 22px"><div class="label">The logit lens: the next token, layer by layer</div>
+      <div id="lens"></div></div>
+  </div>
+  <div class="panel">
+    <div class="label">Heads, each its own pattern</div>
+    <div class="controls">
+      <button id="layer-all">the whole layer</button>
+    </div>
+    <div id="grid"></div>
+    <div class="note" id="grid-note"></div>
+  </div>
+</main>
+<script>
+const D = __DATA__;
+const T = D.tokens.length, L = D.layers, H = D.heads;
+const raw = Uint8Array.from(atob(D.weights), c => c.charCodeAt(0));
+const w = (l, h, i, j) => raw[((l * H + h) * T + i) * T + j] / 255;
+let picked = D.pick, layer = D.layer, head = D.head, whole = false;
+const text = document.getElementById("text");
+D.tokens.forEach((t, i) => {
+  const s = document.createElement("span");
+  s.className = "tok"; s.dataset.i = i;
+  s.textContent = t.replace(/\n/g, "↵");
+  s.onclick = () => { picked = i; draw(); };
+  text.appendChild(s);
+  if (t.includes("\n")) { const br = document.createElement("span"); br.className = "tok nl"; text.appendChild(br); }
+});
+const grid = document.getElementById("grid");
+grid.appendChild(Object.assign(document.createElement("div"), { className: "axis" }));
+for (let h = 0; h < H; h++) grid.appendChild(Object.assign(document.createElement("div"), { className: "axis", textContent: h + 1 }));
+const cells = [];
+for (let l = 0; l < L; l++) {
+  grid.appendChild(Object.assign(document.createElement("div"), { className: "axis", textContent: l + 1 }));
+  for (let h = 0; h < H; h++) {
+    const c = document.createElement("canvas");
+    c.className = "head"; c.width = T; c.height = T; c.dataset.l = l + 1; c.dataset.h = h + 1;
+    c.onclick = () => { layer = l; head = h; whole = false; draw(); };
+    grid.appendChild(c); cells.push([c, l, h]);
+  }
+}
+function patterns() {
+  for (const [c, l, h] of cells) {
+    const ctx = c.getContext("2d"), img = ctx.createImageData(T, T);
+    for (let i = 0; i < T; i++) for (let j = 0; j < T; j++) {
+      const v = Math.pow(w(l, h, i, j), 0.4), k = (i * T + j) * 4;
+      img.data[k] = 23 + v * (168 - 23); img.data[k + 1] = 26 + v * (230 - 26); img.data[k + 2] = 31 + v * (237 - 31);
+      img.data[k + 3] = 255;
+    }
+    ctx.putImageData(img, 0, 0);
+  }
+}
+function draw() {
+  document.querySelectorAll(".tok").forEach(s => {
+    const i = +s.dataset.i; if (isNaN(i)) return;
+    s.classList.toggle("picked", i === picked);
+    let v = 0;
+    if (i <= picked) {
+      if (whole) { for (let h = 0; h < H; h++) v += w(layer, h, picked, i); v /= H; } else v = w(layer, head, picked, i);
+    }
+    s.style.background = `rgba(168, 230, 237, ${Math.min(0.85, v * 1.6)})`;
+    s.style.color = v > 0.3 ? "#101215" : "";
+    s.querySelector(".w")?.remove();
+    if (v >= 0.1 && i !== picked) s.appendChild(Object.assign(document.createElement("span"), { className: "w", textContent: v.toFixed(2) }));
+  });
+  cells.forEach(([c, l, h]) => c.classList.toggle("picked", l === layer && (whole || h === head)));
+  document.getElementById("text-label").textContent =
+    `Layer ${layer + 1}, ${whole ? "all 12 heads, averaged" : "head " + (head + 1)}: from “${D.tokens[picked]}”`;
+  document.getElementById("layer-all").classList.toggle("on", whole);
+  const lensEl = document.getElementById("lens"); lensEl.innerHTML = "";
+  D.lens[picked].forEach(([tok, p], l) => {
+    lensEl.append(Object.assign(document.createElement("div"), { className: "layer", textContent: l === 0 ? "embed" : "layer " + l }));
+    const bar = document.createElement("div"); bar.style.display = "flex"; bar.style.gap = "10px"; bar.style.alignItems = "center";
+    const b = Object.assign(document.createElement("div"), { className: "bar" }); b.style.width = Math.max(2, p * 260) + "px";
+    bar.append(b, Object.assign(document.createElement("span"), { textContent: JSON.stringify(tok) }));
+    lensEl.append(bar, Object.assign(document.createElement("div"), { textContent: (p * 100).toFixed(0) + "%" }));
+  });
+}
+document.getElementById("layer-all").onclick = () => { whole = !whole; draw(); };
+document.getElementById("grid-note").textContent =
+  "Each square: a head's attention on this text, a row per token, brighter where it looks.";
+document.getElementById("what").textContent = D.what;
+patterns(); draw();
+</script></body></html>
