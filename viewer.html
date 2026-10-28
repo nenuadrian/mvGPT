@@ -47,6 +47,8 @@ button.on { border-color: var(--accent); color: var(--accent); }
   <div class="panel">
     <div class="label">Heads, each its own pattern</div>
     <div class="controls">
+      <button id="mode-pattern" class="on">patterns</button>
+      <button id="mode-copy">copying the name</button>
       <button id="layer-all">the whole layer</button>
     </div>
     <div id="grid"></div>
@@ -58,7 +60,7 @@ const D = __DATA__;
 const T = D.tokens.length, L = D.layers, H = D.heads;
 const raw = Uint8Array.from(atob(D.weights), c => c.charCodeAt(0));
 const w = (l, h, i, j) => raw[((l * H + h) * T + i) * T + j] / 255;
-let picked = D.pick, layer = D.layer, head = D.head, whole = false;
+let picked = D.pick, layer = D.layer, head = D.head, whole = false, mode = "pattern";
 const text = document.getElementById("text");
 D.tokens.forEach((t, i) => {
   const s = document.createElement("span");
@@ -92,6 +94,15 @@ function patterns() {
     ctx.putImageData(img, 0, 0);
   }
 }
+function copies() {
+  // Each head as one colour: the share of its attention on the name in the task, from interpret.py heads.
+  const top = Math.max(...D.copy.flat());
+  for (const [c, l, h] of cells) {
+    const ctx = c.getContext("2d"), v = D.copy[l][h] / top;
+    ctx.fillStyle = `rgb(${23 + v * (159 - 23)}, ${26 + v * (180 - 26)}, ${31 + v * (255 - 31)})`;
+    ctx.fillRect(0, 0, T, T);
+  }
+}
 function draw() {
   document.querySelectorAll(".tok").forEach(s => {
     const i = +s.dataset.i; if (isNaN(i)) return;
@@ -119,8 +130,16 @@ function draw() {
   });
 }
 document.getElementById("layer-all").onclick = () => { whole = !whole; draw(); };
-document.getElementById("grid-note").textContent =
-  "Each square: a head's attention on this text, a row per token, brighter where it looks.";
+document.getElementById("mode-pattern").onclick = () => { mode = "pattern"; patterns(); setMode(); };
+document.getElementById("mode-copy").onclick = () => { mode = "copy"; copies(); setMode(); };
+function setMode() {
+  document.getElementById("mode-pattern").classList.toggle("on", mode === "pattern");
+  document.getElementById("mode-copy").classList.toggle("on", mode === "copy");
+  document.getElementById("mode-copy").style.display = D.copy ? "" : "none";
+  document.getElementById("grid-note").textContent = mode === "pattern"
+    ? "Each square: a head's attention on this text, a row per token, brighter where it looks."
+    : "Brighter: more of the head's attention goes to the name in the task, while the query writes it.";
+}
 document.getElementById("what").textContent = D.what;
-patterns(); draw();
+patterns(); setMode(); draw();
 </script></body></html>

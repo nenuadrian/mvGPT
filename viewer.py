@@ -21,6 +21,7 @@ def main():
     parser.add_argument("task")
     parser.add_argument("answer", help="the answer's text, which goes in after the prompt")
     parser.add_argument("--role", default="graph")
+    parser.add_argument("--heads", help="interpret.py heads' results, for each head's copying: a JSON file")
     parser.add_argument("--out", default="attention.html")
     args = parser.parse_args()
 
@@ -38,6 +39,7 @@ def main():
         "weights": base64.b64encode((weights.clamp(0, 1) * 255).round().byte().cpu().numpy().tobytes()).decode(),
         "lens": [[[tokenizer.decode([top.indices[l, t].item()]), round(top.values[l, t].item(), 3)]
                   for l in range(probs.size(0))] for t in range(len(ids))],
+        "copy": json.load(open(args.heads))["scores"] if args.heads else None,
         "pick": len(ids) - 1, "layer": 0, "head": 0,
     }
     with open(PAGE) as f:
