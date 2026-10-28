@@ -131,6 +131,10 @@ python speculative.py checkpoints/graph-agent/model.pt "How much does the King P
 python draft_sft.py 30   # a small draft model, trained on the agent's tasks for 30 minutes
 python speculative_eval.py checkpoints/graph-agent/model.pt checkpoints/draft/model.pt   # the agent's tasks with each draft
 python -m pytest tests/test_speculative.py   # greedy decoding's text with each draft, lookup, the trimmed cache
+python interpret.py checkpoints/graph-agent/model.pt lens "How much does the King Penguin weigh?" " <<cypher MATCH (s:Species {name: '"   # each layer's next token
+python viewer.py checkpoints/graph-agent/model.pt "How much does the King Penguin weigh?" " <<cypher MATCH (s:Species {name: 'King Penguin'}) RETURN s.weight_g>>"   # attention.html
+python interpret.py checkpoints/graph-agent/model.pt heads   # the heads that look at the name, and the graph role without them
+python -m pytest tests/test_interpret.py   # the weights written out, the lens, heads off
 ```
 
 ## Docs

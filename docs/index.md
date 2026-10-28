@@ -106,3 +106,5 @@ Both training runs log to TensorBoard, under `runs/`.
   logits, with two tries walked a byte at a time, the graph's names against the task's words, and both measured.
 - [Speculative decoding](speculative-decoding.md): what a pass costs by its tokens, a draft's guesses checked in the
   pass that writes each token, prompt lookup and a small draft model, and the agent's tasks timed with each.
+- [Inside the model](attention.md): attention written out to keep its weights, the logit lens, a page to look at
+  the 144 heads with, the heads that look at the name a query copies, and heads turned off to test them.

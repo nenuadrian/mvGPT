@@ -95,3 +95,4 @@ nav:
   - The agent asks the graph: graph-agent.md
   - Constrained decoding: constrained-decoding.md
   - Speculative decoding: speculative-decoding.md
+  - Inside the model: attention.md
