@@ -168,6 +168,8 @@ class CausalSelfAttention(nn.Module):
         self.resid_dropout = nn.Dropout(config.dropout)
         # Another function for causal attention over whole sequences, such as flash.py's kernel (GPT.attend_with).
         self.attend = None
+        # For looking inside the model (interpret.py): keep the attention weights, and turn heads off.
+        self.keep, self.weights, self.off = False, None, []
 
     def forward(self, x, cache=None, angles=None):
         B, T, C = x.shape  # batch, tokens, channels
@@ -189,13 +191,26 @@ class CausalSelfAttention(nn.Module):
         # Query i is token S - T + i, which sees the keys up to its own. A single new token sees all S.
         mask = None if T in (1, S) else torch.ones(T, S, dtype=torch.bool, device=x.device).tril(S - T)
         dropout_p = self.dropout_p if self.training else 0.0
-        if self.attend is not None and self.causal and S == T and dropout_p == 0.0:
+        if self.keep:
+            # Written out, as episode 13's attention_by_hand is, to keep the weights: for each token, how much it takes
+            # from each token before it.
+            scores = q @ k.transpose(-2, -1) / math.sqrt(q.size(-1))
+            seen = torch.ones(T, S, dtype=torch.bool, device=x.device).tril(S - T) if self.causal else None
+            if seen is not None:
+                scores = scores.masked_fill(~seen, float("-inf"))
+            self.weights = scores.softmax(dim=-1)
+            y = self.weights @ v
+        elif self.attend is not None and self.causal and S == T and dropout_p == 0.0:
             y = self.attend(q, k, v)
         else:
             # softmax(q k^T / sqrt(64)) v, where each token sees itself and the tokens before it, or, when
             # the model isn't causal, every token in the sequence, before it and after.
             y = F.scaled_dot_product_attention(q, k, v, attn_mask=mask, dropout_p=dropout_p,
                                                is_causal=self.causal and S == T)
+        if self.off:
+            # A head turned off adds nothing to the residual stream.
+            y = y.clone()
+            y[:, self.off] = 0
         y = y.transpose(1, 2).contiguous().view(B, T, C)
         return self.resid_dropout(self.o_proj(y))
 
