@@ -38,14 +38,27 @@ def estimate_loss(model, splits, loss_of=next_token_loss, batches=20):
     model.eval()
     device = next(model.parameters()).device
     losses = {}
+    # Past windows of 512, fewer windows a batch and more batches, so the logits fit next to what training holds:
+    # as many tokens in all, 24,576 a batch.
+    batch = min(BATCH_SIZE, BATCH_SIZE * 512 // model.config.block_size)
+    n = batches * BATCH_SIZE // batch
     for name, data in splits.items():
         total = 0.0
-        for _ in range(batches):
-            x, y = get_batch(data, model.config.block_size, BATCH_SIZE, device)
+        for _ in range(n):
+            x, y = get_batch(data, model.config.block_size, batch, device)
             total += loss_of(model, x, y).item()
-        losses[name] = total / batches
+        losses[name] = total / n
     model.train()
     return losses
+
+
+def param_groups(model):
+    # Weight decay pulls the weight matrices towards zero, but not the biases and the norms' gains, nor the small
+    # network that draws Hyena's filters (hyena.py), which its authors leave out too.
+    decay, rest = [], []
+    for name, p in model.named_parameters():
+        (decay if p.dim() >= 2 and ".filter." not in name else rest).append(p)
+    return [{"params": decay, "weight_decay": 0.1}, {"params": rest, "weight_decay": 0.0}]
 
 
 def learning_rate(step, progress):
@@ -55,18 +68,18 @@ def learning_rate(step, progress):
     return MIN_LR + 0.5 * (LR - MIN_LR) * (1 + math.cos(math.pi * progress))
 
 
-def main(minutes, rope=False, bpe=False, diffusion=False, init=None, modern=False, kv_heads=None):
+def main(minutes, rope=False, bpe=False, diffusion=False, init=None, modern=False, kv_heads=None, hyena=False):
     # Each kind of model gets a run folder of its own: pretrain, pretrain-rope, pretrain-rope-bpe, ...
     run_dir = os.path.join(CHECKPOINTS, "pretrain" + ("-rope" if rope else "") + ("-bpe" if bpe else "")
                            + ("-modern" if modern else "") + (f"-kv{kv_heads}" if kv_heads else "")
-                           + ("-diffusion" if diffusion else "")
+                           + ("-hyena" if hyena else "") + ("-diffusion" if diffusion else "")
                            + ("-converted" if init else ""))
     torch.manual_seed(1337)
     device = pick_device()
     tokenizer = load_tokenizer(bpe)
     # A diffusion model attends both ways, and has one more token, [MASK].
     config = GPTConfig(vocab_size=len(tokenizer) + 1 if diffusion else len(tokenizer), rope=rope, causal=not diffusion,
-                       n_kv_head=kv_heads, **(MODERN if modern else {}))
+                       n_kv_head=kv_heads, mixer="hyena" if hyena else "attention", **(MODERN if modern else {}))
     model = GPT(config).to(device)
     if init:
         from_autoregressive(model, init)
@@ -81,16 +94,7 @@ def main(minutes, rope=False, bpe=False, diffusion=False, init=None, modern=Fals
     }
     print(f"{model.num_params():,} parameters on {device}, {len(splits['train']):,} training tokens")
 
-    # Weight decay pulls the weight matrices towards zero, but not the biases and the norms' gains.
-    params = list(model.parameters())
-    optimizer = torch.optim.AdamW(
-        [
-            {"params": [p for p in params if p.dim() >= 2], "weight_decay": 0.1},
-            {"params": [p for p in params if p.dim() < 2], "weight_decay": 0.0},
-        ],
-        lr=LR,
-        betas=(0.9, 0.95),
-    )
+    optimizer = torch.optim.AdamW(param_groups(model), lr=LR, betas=(0.9, 0.95))
 
     # The run's numbers go to TensorBoard, in a folder named after the run and when it started.
     writer = SummaryWriter(os.path.join(RUNS, time.strftime(f"{os.path.basename(run_dir)}-%Y%m%d-%H%M%S")))
@@ -153,4 +157,5 @@ if __name__ == "__main__":
     # --kv-heads N: grouped-query attention, with N heads of keys and values.
     kv_heads = int(sys.argv[sys.argv.index("--kv-heads") + 1]) if "--kv-heads" in sys.argv else None
     main(float(sys.argv[1]) if len(sys.argv) > 1 else 10, rope="--rope" in sys.argv, bpe="--bpe" in sys.argv,
-         diffusion="--diffusion" in sys.argv, init=init, modern="--modern" in sys.argv, kv_heads=kv_heads)
+         diffusion="--diffusion" in sys.argv, init=init, modern="--modern" in sys.argv, kv_heads=kv_heads,
+         hyena="--hyena" in sys.argv)

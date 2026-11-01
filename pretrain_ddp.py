@@ -15,7 +15,7 @@ from data import DATA_DIR, load_tokenizer
 from diffusion import diffusion_loss, from_autoregressive, mask_id
 from diffusion import write as write_by_denoising
 from model import MODERN, GPT, GPTConfig
-from pretrain import EVAL_EVERY, LR, estimate_loss, get_batch, learning_rate, next_token_loss
+from pretrain import EVAL_EVERY, LR, estimate_loss, get_batch, learning_rate, next_token_loss, param_groups
 from sample import write
 
 
@@ -34,7 +34,7 @@ def setup():
 
 def main():
     parser = argparse.ArgumentParser(description="Pretrain on several GPUs at once, with DistributedDataParallel.")
-    parser.add_argument("minutes", type=float)
+    parser.add_argument("minutes", type=float, nargs="?", help="how long to train, or --steps")
     # GPT-2 small's shape by default, with a smaller vocabulary: about 91 million parameters.
     parser.add_argument("--layers", type=int, default=12)
     parser.add_argument("--heads", type=int, default=12)
@@ -46,6 +46,7 @@ def main():
     parser.add_argument("--web", action="store_true", help="FineWeb-Edu, with its own merges: python data.py --web N")
     parser.add_argument("--accum", type=int, default=1, help="batches whose gradients add up to each step")
     parser.add_argument("--resume", action="store_true", help="carry on from the run's last checkpoint")
+    parser.add_argument("--steps", type=int, help="this many steps instead of minutes, the schedule following them")
     parser.add_argument("--compile", action="store_true")
     parser.add_argument("--attention", default="pytorch", choices=["pytorch", "by-hand", "triton"],
                         help="PyTorch's, ours written out (attention.py), or our flash attention kernel (flash.py)")
@@ -54,8 +55,13 @@ def main():
     parser.add_argument("--init", help="for --diffusion, start from this next-token model's weights")
     parser.add_argument("--modern", action="store_true", help="RMSNorm, SwiGLU, QK-norm, no biases: model.py's MODERN")
     parser.add_argument("--kv-heads", type=int, help="grouped-query attention, with this many heads of keys and values")
+    parser.add_argument("--hyena", action="store_true", help="Hyena's long convolutions and gates in place of attention (hyena.py)")
+    parser.add_argument("--attention-layers", type=int, nargs="+", default=[],
+                        help="with --hyena, the blocks that keep attention, counted from 0: a hybrid")
     parser.add_argument("--name", help="the run's folder: by default pretrain-ddp, with -modern and -kvN after it")
     args = parser.parse_args()
+    if (args.minutes is None) == (args.steps is None):
+        parser.error("give the minutes or --steps")
 
     rank, world, device = setup()
     main_rank = rank == 0
@@ -64,13 +70,14 @@ def main():
     tokenizer = load_tokenizer(bpe=True, merges="web-merges.txt" if args.web else "merges.txt")
     config = GPTConfig(vocab_size=len(tokenizer) + 1 if args.diffusion else len(tokenizer), block_size=args.block,
                        n_layer=args.layers, n_head=args.heads, n_embd=args.embd, dropout=args.dropout, rope=True,
-                       causal=not args.diffusion, n_kv_head=args.kv_heads, **(MODERN if args.modern else {}))
+                       causal=not args.diffusion, n_kv_head=args.kv_heads, mixer="hyena" if args.hyena else "attention",
+                       attention_layers=tuple(args.attention_layers), **(MODERN if args.modern else {}))
     raw = GPT(config).to(device)
     if args.init:
         from_autoregressive(raw, args.init)
     # A run that resumes carries on from the weights, the optimiser's state, the step and the clock it saved.
     name = args.name or "pretrain-" + ("web" if args.web else "ddp") + ("-modern" if args.modern else "") + \
-        (f"-kv{args.kv_heads}" if args.kv_heads else "")
+        (f"-kv{args.kv_heads}" if args.kv_heads else "") + ("-hyena" if args.hyena else "")
     run_dir = os.path.join(CHECKPOINTS, name)
     resume = torch.load(os.path.join(run_dir, "resume.pt"), map_location=device) if args.resume else None
     if resume:
@@ -97,15 +104,12 @@ def main():
     if main_rank:
         gpu = torch.cuda.get_device_name() if device.startswith("cuda") else "CPU"
         kind = "diffusion" + (f" from {args.init}" if args.init else "") if args.diffusion else f"{args.attention} attention"
+        if args.hyena:
+            kind = "Hyena" + (f", {args.attention} attention in blocks {args.attention_layers}" if args.attention_layers else "")
         print(f"{raw.num_params():,} parameters, {world} x {gpu}, {len(splits['train']):,} training tokens, {kind}",
               flush=True)
 
-    params = list(model.parameters())
-    optimizer = torch.optim.AdamW(
-        [{"params": [p for p in params if p.dim() >= 2], "weight_decay": 0.1},
-         {"params": [p for p in params if p.dim() < 2], "weight_decay": 0.0}],
-        lr=LR, betas=(0.9, 0.95),
-    )
+    optimizer = torch.optim.AdamW(param_groups(model), lr=LR, betas=(0.9, 0.95))
     if resume:
         optimizer.load_state_dict(resume["optimizer"])
     writer = SummaryWriter(os.path.join(RUNS, time.strftime(f"{name}-%Y%m%d-%H%M%S"))) if main_rank else None
@@ -134,7 +138,7 @@ def main():
         # The other ranks wait here while rank 0 evaluates, so they all set off again together.
         dist.barrier(device_ids=[torch.cuda.current_device()] if device.startswith("cuda") else None)
 
-    budget = args.minutes * 60
+    budget = None if args.steps else args.minutes * 60
     # A resumed run's clock starts where the saved one stopped, so the learning rate picks up where it was.
     last = time.time()
     start = last - (resume["elapsed"] if resume else 0)
@@ -146,9 +150,10 @@ def main():
         # Rank 0's clock decides, for all of them: the same learning rate, and the same last step.
         elapsed[0] = time.time() - start
         dist.broadcast(elapsed, src=0)
-        if elapsed.item() >= budget:
+        progress = step / args.steps if args.steps else elapsed.item() / budget
+        if progress >= 1:
             break
-        lr = learning_rate(step, elapsed.item() / budget)
+        lr = learning_rate(step, progress)
         for group in optimizer.param_groups:
             group["lr"] = lr
         optimizer.zero_grad(set_to_none=True)
