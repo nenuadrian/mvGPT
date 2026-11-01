@@ -5,6 +5,8 @@ import torch
 import torch.nn as nn
 from torch.nn import functional as F
 
+from hyena import Hyena
+
 
 def pick_device():
     if torch.cuda.is_available():
@@ -31,6 +33,8 @@ class GPTConfig:
     swiglu: bool = False  # a gated MLP, SwiGLU, in place of GELU's
     qk_norm: bool = False  # RMSNorm on each head's queries and keys, before attention compares them
     n_kv_head: int | None = None  # heads of keys and values, each shared by a group of query heads; None is n_head
+    mixer: str = "attention"  # what mixes the tokens in each block: "attention", or "hyena" (hyena.py)
+    attention_layers: tuple = ()  # with mixer "hyena", the blocks that keep attention, from 0: a hybrid
 
 
 # A modern block: RMSNorm, SwiGLU and no biases, as in LLaMA, and QK-norm, as in OLMo 2 and Qwen3. RoPE,
@@ -43,16 +47,25 @@ class KVCache:
         # Per block: the keys and values of the tokens so far, each (B, key and value heads, tokens, 64).
         self.keys = [None] * n_layer
         self.values = [None] * n_layer
+        # Hyena's blocks (hyena.py) keep theirs here instead: each token's gated values, and the last two projections.
+        self.hyena = [None] * n_layer
         # The position of the next token, which, once the cache slides, is past the tokens it keeps.
         self.position = 0
 
     def __len__(self):
-        return 0 if self.keys[0] is None else self.keys[0].size(2)
+        for k in self.keys:
+            if k is not None:
+                return k.size(2)
+        for state in self.hyena:
+            if state is not None:
+                return state["z"].size(-1)
+        return 0
 
     def slide(self, keep):
         # Drop the oldest tokens' keys and values, keeping the last `keep`.
-        self.keys = [k[:, :, -keep:] for k in self.keys]
-        self.values = [v[:, :, -keep:] for v in self.values]
+        self.keys = [k if k is None else k[:, :, -keep:] for k in self.keys]
+        self.values = [v if v is None else v[:, :, -keep:] for v in self.values]
+        self.hyena = [s if s is None else {**s, "z": s["z"][..., -keep:]} for s in self.hyena]
 
     def trim(self, n):
         # Drop the newest n tokens' keys and values: the guesses speculative decoding didn't keep.
@@ -71,8 +84,10 @@ class KVCache:
 
 def kv_cache_bytes(config, tokens, bytes_per_number=4):
     # Per token, a key and a value for each layer, key and value head and channel; float32 is 4 bytes a number.
-    per_token = 2 * config.n_layer * (config.n_kv_head or config.n_head) * (config.n_embd // config.n_head)
-    return per_token * tokens * bytes_per_number
+    # A Hyena block keeps one number a channel instead, and its last two tokens' projections, which don't grow.
+    hyena = config.n_layer - len(config.attention_layers) if config.mixer == "hyena" else 0
+    per_token = 2 * (config.n_layer - hyena) * (config.n_kv_head or config.n_head) * (config.n_embd // config.n_head)
+    return (per_token + hyena * config.n_embd) * tokens * bytes_per_number
 
 
 SCALINGS = ("pi", "ntk", "parts", "yarn")
@@ -246,13 +261,20 @@ class MLP(nn.Module):
 class Block(nn.Module):
     def __init__(self, config, layer):
         super().__init__()
-        self.attn_norm = norm_layer(config, config.n_embd)
-        self.attn = CausalSelfAttention(config, layer)
+        self.attn_norm = norm_layer(config, config.n_embd)  # before attention, or before Hyena in its place
+        if config.mixer == "hyena" and layer not in config.attention_layers:
+            self.hyena = Hyena(config, layer)
+        else:
+            self.attn = CausalSelfAttention(config, layer)
         self.mlp_norm = norm_layer(config, config.n_embd)
         self.mlp = MLP(config)
 
     def forward(self, x, cache=None, angles=None):
-        x = x + self.attn(self.attn_norm(x), cache, angles)
+        if hasattr(self, "hyena"):
+            # Hyena's convolutions know how far back each token is, so the rotary angles aren't for them.
+            x = x + self.hyena(self.attn_norm(x), cache)
+        else:
+            x = x + self.attn(self.attn_norm(x), cache, angles)
         x = x + self.mlp(self.mlp_norm(x))
         return x
 
@@ -292,7 +314,8 @@ class GPT(nn.Module):
         # attend(q, k, v), causal, in place of PyTorch's attention where it can: whole sequences, no
         # dropout. None goes back to PyTorch's.
         for block in self.blocks:
-            block.attn.attend = attend
+            if hasattr(block, "attn"):
+                block.attn.attend = attend
 
     def forward(self, idx, targets=None, cache=None):
         B, T = idx.shape

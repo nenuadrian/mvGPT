@@ -95,15 +95,31 @@ class Hyena(nn.Module):
         self.o_proj = nn.Linear(C, C, bias=config.bias)
         self.resid_dropout = nn.Dropout(config.dropout)
 
-    def forward(self, x):
+    def forward(self, x, cache=None):
         B, T, C = x.shape  # batch, tokens, channels
         p = self.in_proj(x).transpose(1, 2)  # (B, 3C, T): channels first, as convolutions take them
-        u = self.short_conv(p)[..., :T]
+        before = None if cache is None else cache.hyena[self.layer]
+        if before is not None:
+            # Writing with a cache: the last two tokens' projections, for the short filter.
+            p = torch.cat([before["p"], p], dim=-1)
+        u = self.short_conv(p)[..., : p.size(-1)][..., -T:]
         x1, x2, v = u.split(C, dim=1)
         z = x1 * v  # the first gate: each token's values, scaled channel by channel by its x1
-        h = self.filter(T)
-        y = fft_conv(z, h) + self.filter.bias[:, None] * z  # the long convolution, and the skip
+        if before is not None:
+            z = torch.cat([before["z"], z], dim=-1)
+        # The filter doesn't depend on the tokens: with a cache, it's made once, for the whole window.
+        h = before["h"] if before is not None else self.filter(self.filter.length if cache is not None else T)
+        if before is not None and T == 1:
+            # One new token: the gated values of all the tokens so far, each weighted by the filter at its
+            # distance, the newest by h_0. A sum over the cache, as attention's is.
+            y = (z * h[:, : z.size(-1)].flip(-1)).sum(-1, keepdim=True)
+        else:
+            y = fft_conv(z, h[:, : z.size(-1)])[..., -T:]
+        y = y + self.filter.bias[:, None] * z[..., -T:]  # the skip
         y = x2 * y  # the second gate
+        if cache is not None:
+            # One number a channel for each token, z, where attention keeps a key and a value.
+            cache.hyena[self.layer] = {"p": p[..., -2:], "z": z, "h": h}
         return self.resid_dropout(self.o_proj(y.transpose(1, 2)))
 
     def streams(self, x):
