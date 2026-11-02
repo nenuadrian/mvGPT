@@ -108,3 +108,5 @@ Both training runs log to TensorBoard, under `runs/`.
   pass that writes each token, prompt lookup and a small draft model, and the agent's tasks timed with each.
 - [Inside the model](attention.md): attention written out to keep its weights, the logit lens, a page to look at
   the 144 heads with, the heads that look at the name a query copies, and heads turned off to test them.
+- [A GPT without attention](hyena.md): Hyena's long convolutions with the FFT, between two gates, its matrices and
+  filters, a hybrid, and our own attention models against it on speed, loss, long context and recall.

@@ -96,3 +96,4 @@ nav:
   - Constrained decoding: constrained-decoding.md
   - Speculative decoding: speculative-decoding.md
   - Inside the model: attention.md
+  - A GPT without attention: hyena.md

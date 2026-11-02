@@ -138,6 +138,14 @@ python interpret.py checkpoints/graph-agent/model.pt lens "How much does the Kin
 python viewer.py checkpoints/graph-agent/model.pt "How much does the King Penguin weigh?" " <<cypher MATCH (s:Species {name: 'King Penguin'}) RETURN s.weight_g>>"   # attention.html
 python interpret.py checkpoints/graph-agent/model.pt heads   # the heads that look at the name, and the graph role without them
 python -m pytest tests/test_interpret.py   # the weights written out, the lens, heads off
+python -m pytest tests/test_hyena.py   # the FFT against the sums, causal, the matrices, the cache
+python hyena_bench.py --lengths 256 1024 4096 16384 65536   # a layer of attention and of Hyena, by length
+CUDA_VISIBLE_DEVICES=1 ./hyena_runs.sh   # six small models, half an hour each: attention, Hyena, hybrid at 1,024 and 4,096
+torchrun --standalone --nproc_per_node 1 pretrain_ddp.py --steps 36743 --web --compile --block 1024 --batch 24 --accum 4 --hyena   # episode 19's recipe, with Hyena
+torchrun --standalone --nproc_per_node 1 pretrain_ddp.py --steps 36743 --web --compile --block 1024 --batch 24 --accum 4 --hyena --attention-layers 3 9 --name web-hybrid   # and a hybrid
+python hyena_eval.py checkpoints/small-*-4096/model.pt   # loss by position, copying, pass keys, writing
+python flow.py ATTENTION.pt HYENA.pt "Marie Curie was born in Warsaw. Marie Curie was born in" --layer 3 --head 2   # one output, worked
+python recall.py --steps 30000 --lrs 1e-3   # multi-query associative recall, by mixer, width and pairs
 ```
 
 ## Docs
