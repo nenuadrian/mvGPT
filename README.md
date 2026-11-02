@@ -46,6 +46,7 @@ A notebook for each episode runs its commands on its code, as the episode left i
 | 26 | [Constrained decoding: structured LLM output](https://youtu.be/KypK6nrP-nE) | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/nenuadrian/mvGPT/blob/main/notebooks/ep026-constrained-decoding.ipynb) |
 | 27 | [Speculative decoding from scratch](https://youtu.be/gyC0YdAOlio) | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/nenuadrian/mvGPT/blob/main/notebooks/ep027-speculative-decoding.ipynb) |
 | 28 | [Attention heads in our GPT, seen and tested](https://youtu.be/Lq4id0KSNWk) | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/nenuadrian/mvGPT/blob/main/notebooks/ep028-attention.ipynb) |
+| 29 | [Hyena: a GPT without attention, measured](https://youtu.be/52TGLRyPcs8) | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/nenuadrian/mvGPT/blob/main/notebooks/ep029-hyena.ipynb) |
 <!-- /notebooks -->
 
 ## Run it
