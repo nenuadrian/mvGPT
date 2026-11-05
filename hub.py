@@ -55,6 +55,34 @@ def to_gpt2(model, tokenizer):
     return gpt2
 
 
+def from_gpt2(gpt2, model):
+    # The way back: a GPT-2's weights into our model, so that our scripts can sample and measure it.
+    theirs = gpt2.state_dict()
+    state = {
+        "embed_tokens.weight": theirs["transformer.wte.weight"],
+        "embed_positions.weight": theirs["transformer.wpe.weight"],
+        "norm.weight": theirs["transformer.ln_f.weight"],
+        "norm.bias": theirs["transformer.ln_f.bias"],
+        "lm_head.weight": theirs["transformer.wte.weight"],
+    }
+    for i in range(model.config.n_layer):
+        b, h = f"blocks.{i}.", f"transformer.h.{i}."
+        # The one wide layer, cut back into q, k and v.
+        weights = theirs[h + "attn.c_attn.weight"].t().chunk(3)
+        biases = theirs[h + "attn.c_attn.bias"].chunk(3)
+        for p, weight, bias in zip("qkv", weights, biases):
+            state[b + f"attn.{p}_proj.weight"] = weight
+            state[b + f"attn.{p}_proj.bias"] = bias
+        for name, mine in [("attn.c_proj", "attn.o_proj"), ("mlp.c_fc", "mlp.up_proj"), ("mlp.c_proj", "mlp.down_proj")]:
+            state[b + mine + ".weight"] = theirs[h + name + ".weight"].t()
+            state[b + mine + ".bias"] = theirs[h + name + ".bias"]
+        for name, mine in [("ln_1", "attn_norm"), ("ln_2", "mlp_norm")]:
+            state[b + mine + ".weight"] = theirs[h + name + ".weight"]
+            state[b + mine + ".bias"] = theirs[h + name + ".bias"]
+    model.load_state_dict(state)
+    return model
+
+
 def to_neox(model, tokenizer):
     # With rotary embeddings, the model is a GPT-NeoX: pre-LayerNorm blocks with biases, rotary embeddings
     # on all the channels of each head, in the "rotate half" form, and the exact GELU.
