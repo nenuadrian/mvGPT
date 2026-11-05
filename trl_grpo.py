@@ -108,8 +108,12 @@ def main(rollouts, recipe):
         **choices,
     )
     report = Report(policy, tokenizer, per_rollout)
-    trainer = GRPOTrainer(model=to_gpt2(policy, tokenizer), processing_class=to_hf_tokenizer(tokenizer),
-                          reward_funcs=words_reward, args=config, train_dataset=dataset, callbacks=[report])
+    folder = os.path.join(CHECKPOINTS, "sft-hf")
+    to_gpt2(policy, tokenizer).save_pretrained(folder)
+    to_hf_tokenizer(tokenizer).save_pretrained(folder)
+    # A folder, as TRL loads the reference from where the model came from, and the tokenizer with it.
+    trainer = GRPOTrainer(model=folder, reward_funcs=words_reward, args=config, train_dataset=dataset,
+                          callbacks=[report])
     # Our line per rollout, in place of the progress bar and its dictionaries of numbers.
     trainer.remove_callback(ProgressCallback)
     trainer.train()
