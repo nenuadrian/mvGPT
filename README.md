@@ -147,6 +147,8 @@ torchrun --standalone --nproc_per_node 1 pretrain_ddp.py --steps 36743 --web --c
 python hyena_eval.py checkpoints/small-*-4096/model.pt   # loss by position, copying, pass keys, writing
 python flow.py ATTENTION.pt HYENA.pt "Marie Curie was born in Warsaw. Marie Curie was born in" --layer 3 --head 2   # one output, worked
 python recall.py --steps 30000 --lrs 1e-3   # multi-query associative recall, by mixer, width and pairs
+python trl_grpo.py 32 matched    # GRPO with Hugging Face's TRL, with grpo.py's settings, for 32 rollouts
+python trl_grpo.py 32 defaults   # and with TRL's defaults: no KL penalty, DAPO's loss, one pass, bfloat16
 ```
 
 ## Docs

@@ -97,3 +97,4 @@ nav:
   - Speculative decoding: speculative-decoding.md
   - Inside the model: attention.md
   - A GPT without attention: hyena.md
+  - GRPO, with Hugging Face's TRL: trl.md

@@ -110,3 +110,5 @@ Both training runs log to TensorBoard, under `runs/`.
   the 144 heads with, the heads that look at the name a query copies, and heads turned off to test them.
 - [A GPT without attention](hyena.md): Hyena's long convolutions with the FFT, between two gates, its matrices and
   filters, a hybrid, and our own attention models against it on speed, loss, long context and recall.
+- [GRPO, with Hugging Face's TRL](trl.md): our model saved as a GPT-2 for TRL's GRPO trainer, our settings in its
+  config, a folder for its reference, and TRL's defaults, measured next to our own GRPO.
