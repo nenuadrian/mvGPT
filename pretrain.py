@@ -19,6 +19,7 @@ LR = 6e-4
 MIN_LR = LR / 10
 WARMUP_STEPS = 100
 EVAL_EVERY = 250
+BALANCE_WEIGHT = 0.01
 
 
 def get_batch(data, block_size, batch_size, device):
@@ -68,18 +69,21 @@ def learning_rate(step, progress):
     return MIN_LR + 0.5 * (LR - MIN_LR) * (1 + math.cos(math.pi * progress))
 
 
-def main(minutes, rope=False, bpe=False, diffusion=False, init=None, modern=False, kv_heads=None, hyena=False):
+def main(minutes, rope=False, bpe=False, diffusion=False, init=None, modern=False, kv_heads=None, hyena=False,
+         experts=0, top_k=2, balance="loss", steps=None):
     # Each kind of model gets a run folder of its own: pretrain, pretrain-rope, pretrain-rope-bpe, ...
+    moe = f"-moe{experts}" + (f"-top{top_k}" if top_k != 2 else "") + (f"-{balance}" if balance != "loss" else "")
     run_dir = os.path.join(CHECKPOINTS, "pretrain" + ("-rope" if rope else "") + ("-bpe" if bpe else "")
                            + ("-modern" if modern else "") + (f"-kv{kv_heads}" if kv_heads else "")
                            + ("-hyena" if hyena else "") + ("-diffusion" if diffusion else "")
-                           + ("-converted" if init else ""))
+                           + ("-converted" if init else "") + (moe if experts else ""))
     torch.manual_seed(1337)
     device = pick_device()
     tokenizer = load_tokenizer(bpe)
     # A diffusion model attends both ways, and has one more token, [MASK].
     config = GPTConfig(vocab_size=len(tokenizer) + 1 if diffusion else len(tokenizer), rope=rope, causal=not diffusion,
-                       n_kv_head=kv_heads, mixer="hyena" if hyena else "attention", **(MODERN if modern else {}))
+                       n_kv_head=kv_heads, mixer="hyena" if hyena else "attention", n_expert=experts,
+                       expert_top_k=top_k, **(MODERN if modern else {}))
     model = GPT(config).to(device)
     if init:
         from_autoregressive(model, init)
@@ -118,14 +122,25 @@ def main(minutes, rope=False, bpe=False, diffusion=False, init=None, modern=Fals
     start = last = time.time()
     step = 0
     evaluate(step)
-    while (elapsed := time.time() - start) < budget:
-        lr = learning_rate(step, elapsed / budget)
+
+    def progress():
+        # How far through the run we are, from 0 to 1: by the clock, or with steps, by the steps taken, so that runs
+        # of different speeds see as many tokens.
+        return step / steps if steps else (time.time() - start) / budget
+
+    while progress() < 1:
+        lr = learning_rate(step, progress())
         for group in optimizer.param_groups:
             group["lr"] = lr
         x, y = get_batch(splits["train"], config.block_size, BATCH_SIZE, device)
         loss = loss_of(model, x, y)
         optimizer.zero_grad(set_to_none=True)
-        loss.backward()
+        if experts and balance == "loss":
+            # The experts' balancing loss, averaged over the blocks, a hundredth of it on top of the loss we learn
+            # from, as in the Switch Transformer paper.
+            (loss + BALANCE_WEIGHT * sum(b.mlp.aux_loss for b in model.blocks) / config.n_layer).backward()
+        else:
+            loss.backward()
         # A rare bad batch can't throw the weights off: the gradient's length is capped at 1.
         torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
         optimizer.step()
@@ -138,7 +153,16 @@ def main(minutes, rope=False, bpe=False, diffusion=False, init=None, modern=Fals
             writer.add_scalar("loss/batch", loss.item(), step)
             writer.add_scalar("lr", lr, step)
             writer.add_scalar("tokens_per_s", speed, step)
-            print(f"step {step:>5} | loss {loss.item():.3f} | lr {lr:.1e} | {speed:,.0f} tokens/s", flush=True)
+            line = f"step {step:>5} | loss {loss.item():.3f} | lr {lr:.1e} | {speed:,.0f} tokens/s"
+            if experts:
+                # Each expert's share of the tokens in each block, for TensorBoard, and the smallest and largest
+                # of them on the line: 12.5% each, with 8 experts, when they're even.
+                shares = torch.stack([b.mlp.load.float() / b.mlp.load.sum() for b in model.blocks]).cpu()
+                for layer, row in enumerate(shares):
+                    for e, share in enumerate(row):
+                        writer.add_scalar(f"experts/layer{layer}/expert{e}", share.item(), step)
+                line += f" | experts {shares.min().item():.1%} to {shares.max().item():.1%}"
+            print(line, flush=True)
         if step % EVAL_EVERY == 0:
             evaluate(step)
             last = time.time()
@@ -156,6 +180,14 @@ if __name__ == "__main__":
     init = sys.argv[sys.argv.index("--init") + 1] if "--init" in sys.argv else None
     # --kv-heads N: grouped-query attention, with N heads of keys and values.
     kv_heads = int(sys.argv[sys.argv.index("--kv-heads") + 1]) if "--kv-heads" in sys.argv else None
-    main(float(sys.argv[1]) if len(sys.argv) > 1 else 10, rope="--rope" in sys.argv, bpe="--bpe" in sys.argv,
+
+    def option(name, default, kind=int):
+        return kind(sys.argv[sys.argv.index(name) + 1]) if name in sys.argv else default
+
+    # --moe N: a mixture of N experts in each block, each token going to --top-k of them (2), with the balancing loss
+    # unless --balance is none. --steps N ends the run after N steps instead of the minutes.
+    minutes = float(sys.argv[1]) if len(sys.argv) > 1 and not sys.argv[1].startswith("--") else 10
+    main(minutes, rope="--rope" in sys.argv, bpe="--bpe" in sys.argv,
          diffusion="--diffusion" in sys.argv, init=init, modern="--modern" in sys.argv, kv_heads=kv_heads,
-         hyena="--hyena" in sys.argv)
+         hyena="--hyena" in sys.argv, experts=option("--moe", 0), top_k=option("--top-k", 2),
+         balance=option("--balance", "loss", str), steps=option("--steps", None))
