@@ -35,6 +35,9 @@ class GPTConfig:
     n_kv_head: int | None = None  # heads of keys and values, each shared by a group of query heads; None is n_head
     mixer: str = "attention"  # what mixes the tokens in each block: "attention", or "hyena" (hyena.py)
     attention_layers: tuple = ()  # with mixer "hyena", the blocks that keep attention, from 0: a hybrid
+    n_expert: int = 0  # a mixture of experts in place of each block's MLP, with this many; 0 is one MLP
+    expert_top_k: int = 2  # the experts each token goes to
+    expert_hidden: int | None = None  # an expert's width; None is the MLP's divided by top k, for as much compute
 
 
 # A modern block: RMSNorm, SwiGLU and no biases, as in LLaMA, and QK-norm, as in OLMo 2 and Qwen3. RoPE,
@@ -240,12 +243,16 @@ def silu(x):
     return x * torch.sigmoid(x)
 
 
+def mlp_hidden(config):
+    # SwiGLU has three matrices to GELU's two, so at 8/3 of the embedding size wide, it has as many weights,
+    # rounded up to a multiple of 64, a size GPUs handle well: 1,024 for our 384.
+    return 64 * math.ceil(8 * config.n_embd / 3 / 64) if config.swiglu else 4 * config.n_embd
+
+
 class MLP(nn.Module):
-    def __init__(self, config):
+    def __init__(self, config, hidden=None):
         super().__init__()
-        # SwiGLU has three matrices to GELU's two, so at 8/3 of the embedding size wide, it has as many weights,
-        # rounded up to a multiple of 64, a size GPUs handle well: 1,024 for our 384.
-        hidden = 64 * math.ceil(8 * config.n_embd / 3 / 64) if config.swiglu else 4 * config.n_embd
+        hidden = hidden or mlp_hidden(config)
         # The gate: a second projection up, which scales each of up_proj's channels on the way through.
         self.gate_proj = nn.Linear(config.n_embd, hidden, bias=config.bias) if config.swiglu else None
         self.up_proj = nn.Linear(config.n_embd, hidden, bias=config.bias)
@@ -258,6 +265,52 @@ class MLP(nn.Module):
         return self.dropout(self.down_proj(silu(self.gate_proj(x)) * self.up_proj(x)))
 
 
+class MoE(nn.Module):
+    def __init__(self, config):
+        super().__init__()
+        self.n_expert = config.n_expert
+        self.top_k = config.expert_top_k
+        # Each expert is an MLP of its own, and a token goes through top_k of them. At the MLP's width divided by
+        # top_k, a token costs what it cost with one MLP, while the block holds n_expert / top_k times the weights.
+        hidden = config.expert_hidden or mlp_hidden(config) // config.expert_top_k
+        self.experts = nn.ModuleList([MLP(config, hidden) for _ in range(config.n_expert)])
+        # The router scores each expert for each token, from the token's channels.
+        self.router = nn.Linear(config.n_embd, config.n_expert, bias=False)
+        self.aux_loss = None  # the last batch's balancing loss
+        self.load = None  # and how many of its tokens went to each expert
+
+    def forward(self, x):
+        B, T, C = x.shape
+        x = x.reshape(B * T, C)
+        probs = F.softmax(self.router(x), dim=-1)
+        # Each token's top_k experts, by score, and their weights, scaled to add up to 1.
+        weights, chosen = torch.topk(probs, self.top_k, dim=-1)
+        weights = weights / weights.sum(dim=-1, keepdim=True)
+
+        # Sort the (token, expert) pairs by expert, so each expert gets its tokens as one block of rows.
+        flat = chosen.reshape(-1)
+        order = flat.argsort()
+        token = order // self.top_k
+        weight = weights.reshape(-1)[order]
+        rows = x[token]
+        counts = torch.bincount(flat, minlength=self.n_expert)
+        out = torch.zeros_like(x)
+        start = 0
+        for expert, n in zip(self.experts, counts.tolist()):
+            end = start + n
+            y = expert(rows[start:end])
+            # Each output scaled by its weight, and added into the row of the token it came from.
+            out.index_add_(0, token[start:end], y * weight[start:end, None])
+            start = end
+
+        # Switch Transformer's balancing loss: the share of the tokens each expert got, times its average score,
+        # summed and times n_expert. Spread evenly, it's 1, and it grows as the router favours a few experts.
+        share = counts.float() / flat.numel()
+        self.aux_loss = self.n_expert * (share * probs.mean(dim=0)).sum()
+        self.load = counts.detach()
+        return out.view(B, T, C)
+
+
 class Block(nn.Module):
     def __init__(self, config, layer):
         super().__init__()
@@ -267,7 +320,7 @@ class Block(nn.Module):
         else:
             self.attn = CausalSelfAttention(config, layer)
         self.mlp_norm = norm_layer(config, config.n_embd)
-        self.mlp = MLP(config)
+        self.mlp = MoE(config) if config.n_expert else MLP(config)
 
     def forward(self, x, cache=None, angles=None):
         if hasattr(self, "hyena"):
