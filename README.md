@@ -1,4 +1,8 @@
+[![mvGPT: understand language models from the ground up](.github/cover.jpg)](https://mvgpt.nenuadrian.com)
+
 # mvGPT
+
+[![Docs](https://github.com/nenuadrian/mvGPT/actions/workflows/docs.yml/badge.svg)](https://github.com/nenuadrian/mvGPT/actions/workflows/docs.yml)
 
 A minimum viable GPT: a small decoder-only transformer, written from scratch in PyTorch, that you
 can read from one end to the other. It has 14.6 million parameters and learns to write children's
