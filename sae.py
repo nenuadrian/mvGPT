@@ -194,6 +194,74 @@ def evaluate(args):
     print(f"  loss recovered by the autoencoder:  {(ablated - spliced) / (ablated - clean):.1%}")
 
 
+def context(tokenizer, ids, at, before=12, after=3):
+    # The text around token `at`, with the token itself in bold yellow.
+    left = tokenizer.decode(ids[max(0, at - before) : at])
+    token = tokenizer.decode(ids[at : at + 1])
+    right = tokenizer.decode(ids[at + 1 : at + 1 + after])
+    return (left + "\x1b[1;33m" + token + "\x1b[0m" + right).replace("\n", " ")
+
+
+@torch.no_grad()
+def fire_rates(sae, model, layer, device, tokens=50_000):
+    # The share of held-out tokens each feature fires on, past each window's first token.
+    data = np.memmap(os.path.join(DATA_DIR, "valid-web.bin"), dtype=np.uint16, mode="r")[:tokens]
+    windows = torch.from_numpy(data[: len(data) // 1024 * 1024].astype(np.int64)).view(-1, 1024)
+    fired = torch.zeros(sae.encoder.out_features, device=device)
+    for i in range(0, len(windows), 8):
+        fired += (sae.encode(stream(model, windows[i : i + 8].to(device), layer)[:, 1:] * sae.scale) > 0).sum(dim=(0, 1))
+    return fired / (len(windows) * 1023)
+
+
+@torch.no_grad()
+def features_of(args):
+    # Each token of a text, with the features that fire most strongly on it.
+    device = pick_device()
+    sae, model, tokenizer, layer = load_sae(args.sae, device)
+    # A feature that fires on most tokens says little about any one of them, so those are left out of the list.
+    dense = fire_rates(sae, model, layer, device) > 0.5
+    print("left out, as they fire on over half of all tokens: " + ", ".join(map(str, dense.nonzero().flatten().tolist())))
+    ids = tokenizer.encode(args.text)
+    features = sae.encode(stream(model, torch.tensor([ids], device=device), layer)[0] * sae.scale)
+    features[:, dense] = 0
+    # The first token, as in training, is left out.
+    for i, row in enumerate(features[1:], start=1):
+        top = row.topk(args.top)
+        found = ", ".join(f"{f} ({v:.1f})" for v, f in zip(top.values.tolist(), top.indices.tolist()) if v > 0)
+        print(f"{tokenizer.decode([ids[i]])!r:>16}  {found}")
+
+
+@torch.no_grad()
+def show(args):
+    # For each feature asked for: how often it fires on held-out text, the contexts where it fires most strongly, and
+    # the tokens its direction pushes the model towards.
+    device = pick_device()
+    sae, model, tokenizer, layer = load_sae(args.sae, device)
+    data = np.memmap(os.path.join(DATA_DIR, "valid-web.bin"), dtype=np.uint16, mode="r")[: args.tokens]
+    wanted = torch.tensor(args.features, device=device)
+    best = [[] for _ in args.features]
+    fired = torch.zeros(len(args.features), device=device)
+    for start in range(0, len(data) - 1024, 1024 * 8):
+        windows = torch.from_numpy(np.stack([data[i : i + 1024].astype(np.int64)
+                                             for i in range(start, min(start + 1024 * 8, len(data) - 1024), 1024)]))
+        acts = sae.encode(stream(model, windows.to(device), layer)[:, 1:] * sae.scale)[..., wanted]
+        fired += (acts > 0).sum(dim=(0, 1))
+        for j in range(len(args.features)):
+            top = acts[..., j].flatten().topk(args.examples)
+            # Back from an index into the windows without their first token, to a position in the data.
+            at = [start + (i // 1023) * 1024 + i % 1023 + 1 for i in top.indices.tolist()]
+            best[j] += [(v, a) for v, a in zip(top.values.tolist(), at) if v > 0]
+    ids = data.tolist()
+    # A direction's effect on the next token, read straight through the head: which tokens it raises the most.
+    directions = sae.decoder.weight[:, wanted].t() / sae.scale
+    raised = (directions @ model.lm_head.weight.t()).topk(8).indices
+    for j, f in enumerate(args.features):
+        print(f"\nfeature {f}: fires on {fired[j].item() / len(data):.2%} of tokens, raises: "
+              + ", ".join(repr(tokenizer.decode([t])) for t in raised[j].tolist()))
+        for v, at in sorted(best[j], reverse=True)[: args.examples]:
+            print(f"  {v:5.1f}  {context(tokenizer, ids, at)}")
+
+
 def main():
     parser = argparse.ArgumentParser(description="A sparse autoencoder on a model's residual stream.")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -212,8 +280,17 @@ def main():
     e = sub.add_parser("evaluate")
     e.add_argument("sae")
     e.add_argument("--windows", type=int, default=64)
+    f = sub.add_parser("features")
+    f.add_argument("sae")
+    f.add_argument("text")
+    f.add_argument("--top", type=int, default=3)
+    sh = sub.add_parser("show")
+    sh.add_argument("sae")
+    sh.add_argument("features", type=int, nargs="+")
+    sh.add_argument("--tokens", type=int, default=500_000)
+    sh.add_argument("--examples", type=int, default=6)
     args = parser.parse_args()
-    {"train": train, "norms": norms, "evaluate": evaluate}[args.command](args)
+    {"train": train, "norms": norms, "evaluate": evaluate, "features": features_of, "show": show}[args.command](args)
 
 
 if __name__ == "__main__":
