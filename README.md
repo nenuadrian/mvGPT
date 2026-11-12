@@ -150,6 +150,9 @@ python flow.py ATTENTION.pt HYENA.pt "Marie Curie was born in Warsaw. Marie Curi
 python recall.py --steps 30000 --lrs 1e-3   # multi-query associative recall, by mixer, width and pairs
 python trl_grpo.py 32 matched    # GRPO with Hugging Face's TRL, with grpo.py's settings, for 32 rollouts
 python trl_grpo.py 32 defaults   # and with TRL's defaults: no KL penalty, DAPO's loss, one pass, bfloat16
+python -m pytest tests/test_moe.py   # each token's two experts, the sizes, the balancing loss and the bias
+python pretrain.py --modern --moe 8 --steps 2000   # 8 experts, 2 per token, with the balancing loss (--balance bias or none)
+python experts.py checkpoints/pretrain-modern-moe8/model.pt   # which words each expert gets, block by block
 ```
 
 ## Docs

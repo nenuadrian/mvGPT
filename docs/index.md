@@ -112,3 +112,6 @@ Both training runs log to TensorBoard, under `runs/`.
   filters, a hybrid, and our own attention models against it on speed, loss, long context and recall.
 - [GRPO, with Hugging Face's TRL](trl.md): our model saved as a GPT-2 for TRL's GRPO trainer, our settings in its
   config, a folder for its reference, and TRL's defaults, measured next to our own GRPO.
+- [A mixture of experts](moe.md): eight experts and a router in place of each block's MLP, as a loop and as one
+  batched multiply, balanced by Switch Transformer's loss, by DeepSeek-V3's bias or not at all, against the dense
+  model, and the words each expert gets.
