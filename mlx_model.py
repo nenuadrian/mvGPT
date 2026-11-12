@@ -126,3 +126,18 @@ def generate(model, ids, max_new_tokens, temperature=1.0, top_k=None, eos_id=Non
         logits = model(next_id[:, None], cache)
     return out
 
+
+def to_torch(model, tokenizer, path):
+    """An MLX model of ours back as a PyTorch checkpoint, so that sample.py and evaluate.py load it."""
+    import numpy as np
+    import torch
+    from mlx.utils import tree_flatten
+
+    from checkpoint import save_checkpoint
+    from model import GPT as TorchGPT, GPTConfig
+
+    state = {name: torch.from_numpy(np.array(w)) for name, w in tree_flatten(model.parameters())}
+    state["lm_head.weight"] = state["embed_tokens.weight"]
+    torch_model = TorchGPT(GPTConfig(**model.config))
+    torch_model.load_state_dict(state)
+    save_checkpoint(path, torch_model, tokenizer)

@@ -4,8 +4,8 @@ import torch
 
 mx = pytest.importorskip("mlx.core")  # requirements.txt installs MLX on macOS: elsewhere, these tests are skipped
 
-from checkpoint import save_checkpoint  # noqa: E402
-from mlx_model import from_torch, generate  # noqa: E402
+from checkpoint import load_checkpoint, save_checkpoint  # noqa: E402
+from mlx_model import from_torch, generate, to_torch  # noqa: E402
 from model import GPT, GPTConfig  # noqa: E402
 from tokenizer import WordTokenizer  # noqa: E402
 
@@ -36,3 +36,13 @@ def test_both_write_the_same_tokens_and_the_cache_changes_nothing(tmp_path):
     torch_ids = torch_model.generate(torch.tensor([ids]), 20, top_k=1)[0].tolist()
     assert mlx_ids == torch_ids
 
+
+def test_a_model_goes_to_pytorch_and_back_unchanged(tmp_path):
+    _, path = tiny(tmp_path)
+    mlx_model, tokenizer = from_torch(path)
+    back = str(tmp_path / "back.pt")
+    to_torch(mlx_model, tokenizer, back)
+    before, _, _ = load_checkpoint(path)
+    after, _, _ = load_checkpoint(back)
+    for name, weight in before.state_dict().items():
+        assert torch.equal(weight, after.state_dict()[name])
