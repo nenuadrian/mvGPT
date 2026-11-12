@@ -125,6 +125,29 @@ def train(args):
     print(f"done: {step:,} steps, {step * args.batch:,} tokens, {(time.time() - start) / 60:.1f} minutes")
 
 
+def load_sae(path, device):
+    saved = torch.load(path, map_location=device)
+    model, tokenizer, _ = load_checkpoint(saved["checkpoint"], device)
+    model.eval()
+    sae = SparseAutoencoder(model.config.n_embd, saved["n_features"], saved["k"]).to(device)
+    sae.load_state_dict(saved["sae"])
+    return sae, model, tokenizer, saved["layer"]
+
+
+class Splice:
+    """While it's open, the stream after `layer` blocks goes through change(x) before the rest of the model sees it."""
+
+    def __init__(self, model, layer, change):
+        self.block, self.change = model.blocks[layer - 1], change
+
+    def __enter__(self):
+        # A forward hook that returns a value replaces the block's output with it.
+        self.hook = self.block.register_forward_hook(lambda module, inputs, out: self.change(out))
+
+    def __exit__(self, *exc):
+        self.hook.remove()
+
+
 @torch.no_grad()
 def norms(args):
     # How long the stream's vectors are, position by position, averaged over held-out windows.
@@ -137,6 +160,38 @@ def norms(args):
     for i in range(6):
         print(f"position {i}: {lengths[i]:6.1f}")
     print(f"positions 6 to 1023: {np.median(lengths[6:]):6.1f} on average (median)")
+
+
+@torch.no_grad()
+def evaluate(args):
+    device = pick_device()
+    sae, model, _, layer = load_sae(args.sae, device)
+    data = np.memmap(os.path.join(DATA_DIR, "valid-web.bin"), dtype=np.uint16, mode="r")
+    np.random.seed(0)
+    windows = get_windows(data, 1025, args.windows, device)
+    x, y = windows[:, :-1], windows[:, 1:]
+
+    def loss():
+        total = 0.0
+        for i in range(0, len(x), 4):
+            logits, _ = model(x[i : i + 4])
+            total += F.cross_entropy(logits.flatten(0, 1), y[i : i + 4].flatten(), reduction="sum").item()
+        return total / y.numel()
+
+    clean = loss()
+    # The stream replaced by the autoencoder's reconstruction of it, scaled back to the model's units, past each
+    # window's first token, which the autoencoder never saw.
+    with Splice(model, layer, lambda s: torch.cat([s[:, :1], sae(s[:, 1:] * sae.scale)[0] / sae.scale], dim=1)):
+        spliced = loss()
+    # And by the stream's average token, which keeps none of what each token carries: the floor to compare with.
+    mean = stream(model, x[:8], layer)[:, 1:].mean(dim=(0, 1))
+    with Splice(model, layer, lambda s: torch.cat([s[:, :1], mean.expand_as(s[:, 1:])], dim=1)):
+        ablated = loss()
+    print(f"next-token loss on {y.numel():,} held-out tokens")
+    print(f"  the model as it is:                 {clean:.3f}")
+    print(f"  through the sparse autoencoder:     {spliced:.3f}")
+    print(f"  with the average token instead:     {ablated:.3f}")
+    print(f"  loss recovered by the autoencoder:  {(ablated - spliced) / (ablated - clean):.1%}")
 
 
 def main():
@@ -154,8 +209,11 @@ def main():
     n = sub.add_parser("norms")
     n.add_argument("checkpoint")
     n.add_argument("--layer", type=int, default=6)
+    e = sub.add_parser("evaluate")
+    e.add_argument("sae")
+    e.add_argument("--windows", type=int, default=64)
     args = parser.parse_args()
-    {"train": train, "norms": norms}[args.command](args)
+    {"train": train, "norms": norms, "evaluate": evaluate}[args.command](args)
 
 
 if __name__ == "__main__":

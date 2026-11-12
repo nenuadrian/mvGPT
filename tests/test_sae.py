@@ -1,7 +1,7 @@
 import torch
 
 from model import GPT, GPTConfig
-from sae import SparseAutoencoder, stream
+from sae import SparseAutoencoder, Splice, stream
 
 
 def tiny_model():
@@ -33,3 +33,14 @@ def test_the_stream_is_the_output_of_the_blocks_before_it():
     model(idx)
     hook.remove()
     assert torch.allclose(stream(model, idx, 2), outputs[0], atol=1e-6)
+
+
+def test_a_splice_changes_what_the_rest_of_the_model_sees_and_goes_away():
+    model = tiny_model()
+    idx = torch.randint(50, (1, 8))
+    clean = model(idx)[0]
+    with Splice(model, 2, lambda s: s):
+        assert torch.allclose(model(idx)[0], clean)
+    with Splice(model, 2, lambda s: torch.zeros_like(s)):
+        assert not torch.allclose(model(idx)[0], clean)
+    assert torch.allclose(model(idx)[0], clean)
