@@ -156,6 +156,11 @@ python experts.py checkpoints/pretrain-modern-moe8/model.pt   # which words each
 python -m pytest tests/test_mlx.py   # MLX against PyTorch: the logits, the greedy tokens, the round trip (macOS)
 python mlx_bench.py checkpoints/sft/model.pt   # writing and training, MLX against PyTorch, taking turns
 python mlx_pretrain.py 1250   # pretraining in MLX, saved as a PyTorch checkpoint in checkpoints/pretrain-mlx
+python sae.py norms checkpoints/pretrain-web/model.pt   # the stream's length by position: the attention sink
+python sae.py train checkpoints/pretrain-web/model.pt   # a sparse autoencoder on the stream after block 6, 15 minutes
+python sae.py evaluate checkpoints/sae/sae.pt   # the model's loss through it, and with the average token
+python sae.py show checkpoints/sae/sae.pt 1621 1767 5386   # where features fire, and the tokens they raise
+python sae.py steer checkpoints/sae/sae.pt 5386 "My favourite thing to do at night is" --strength 12
 ```
 
 ## Docs

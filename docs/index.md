@@ -117,3 +117,5 @@ Both training runs log to TensorBoard, under `runs/`.
   model, and the words each expert gets.
 - [Our GPT in MLX](mlx.md): the model in Apple's array library with PyTorch's weights, the same logits and story, a
   race at writing and training on a Mac, and a run trained in MLX and brought back to PyTorch.
+- [Features, with a sparse autoencoder](sae.md): the attention sink in the stream, a TopK autoencoder trained on the
+  web model's stream after block 6, what it costs the model, features for cities, carbon and the moon, and steering.

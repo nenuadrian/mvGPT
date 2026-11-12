@@ -100,3 +100,4 @@ nav:
   - GRPO, with Hugging Face's TRL: trl.md
   - A mixture of experts: moe.md
   - Our GPT in MLX: mlx.md
+  - Features, with a sparse autoencoder: sae.md
