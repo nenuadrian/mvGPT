@@ -99,3 +99,4 @@ nav:
   - A GPT without attention: hyena.md
   - GRPO, with Hugging Face's TRL: trl.md
   - A mixture of experts: moe.md
+  - Our GPT in MLX: mlx.md

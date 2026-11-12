@@ -153,6 +153,9 @@ python trl_grpo.py 32 defaults   # and with TRL's defaults: no KL penalty, DAPO'
 python -m pytest tests/test_moe.py   # each token's two experts, the sizes, the balancing loss and the bias
 python pretrain.py --modern --moe 8 --steps 2000   # 8 experts, 2 per token, with the balancing loss (--balance bias or none)
 python experts.py checkpoints/pretrain-modern-moe8/model.pt   # which words each expert gets, block by block
+python -m pytest tests/test_mlx.py   # MLX against PyTorch: the logits, the greedy tokens, the round trip (macOS)
+python mlx_bench.py checkpoints/sft/model.pt   # writing and training, MLX against PyTorch, taking turns
+python mlx_pretrain.py 1250   # pretraining in MLX, saved as a PyTorch checkpoint in checkpoints/pretrain-mlx
 ```
 
 ## Docs

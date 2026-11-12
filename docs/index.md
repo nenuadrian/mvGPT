@@ -115,3 +115,5 @@ Both training runs log to TensorBoard, under `runs/`.
 - [A mixture of experts](moe.md): eight experts and a router in place of each block's MLP, as a loop and as one
   batched multiply, balanced by Switch Transformer's loss, by DeepSeek-V3's bias or not at all, against the dense
   model, and the words each expert gets.
+- [Our GPT in MLX](mlx.md): the model in Apple's array library with PyTorch's weights, the same logits and story, a
+  race at writing and training on a Mac, and a run trained in MLX and brought back to PyTorch.
