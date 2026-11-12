@@ -290,6 +290,7 @@ class MoE(nn.Module):
         self.register_buffer("bias", torch.zeros(config.n_expert))
         self.aux_loss = None  # the last batch's balancing loss
         self.load = None  # and how many of its tokens went to each expert
+        self.chosen = None  # and each token's experts, the first choice first
 
     def expert(self, e, x):
         # Expert e on its own, as an MLP runs: for the tests, and to read.
@@ -326,6 +327,7 @@ class MoE(nn.Module):
         share = counts.float() / flat.numel()
         self.aux_loss = self.n_expert * (share * probs.mean(dim=0)).sum()
         self.load = counts.detach()
+        self.chosen = chosen.detach()
         return self.dropout(out).view(B, T, C)
 
     @torch.no_grad()
