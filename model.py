@@ -285,6 +285,9 @@ class MoE(nn.Module):
         self.dropout = nn.Dropout(config.dropout)
         # The router scores each expert for each token, from the token's channels.
         self.router = nn.Linear(config.n_embd, config.n_expert, bias=False)
+        # Added to the scores to pick the experts, and nowhere else: DeepSeek-V3's balancing without a loss, which
+        # update_bias nudges after each optimiser step. It stays at zeros with the balancing loss.
+        self.register_buffer("bias", torch.zeros(config.n_expert))
         self.aux_loss = None  # the last batch's balancing loss
         self.load = None  # and how many of its tokens went to each expert
 
@@ -296,8 +299,10 @@ class MoE(nn.Module):
         B, T, C = x.shape
         x = x.reshape(B * T, C)
         probs = F.softmax(self.router(x), dim=-1)
-        # Each token's top_k experts, by score, and their weights, scaled to add up to 1.
-        weights, chosen = torch.topk(probs, self.top_k, dim=-1)
+        # Each token's top_k experts, by score with the bias, and their weights from the scores without it, scaled
+        # to add up to 1.
+        chosen = torch.topk(probs + self.bias, self.top_k, dim=-1).indices
+        weights = probs.gather(1, chosen)
         weights = weights / weights.sum(dim=-1, keepdim=True)
 
         # Sort the (token, expert) pairs by expert, so each expert gets its tokens as one block of rows.
@@ -322,6 +327,13 @@ class MoE(nn.Module):
         self.aux_loss = self.n_expert * (share * probs.mean(dim=0)).sum()
         self.load = counts.detach()
         return self.dropout(out).view(B, T, C)
+
+    @torch.no_grad()
+    def update_bias(self, rate=1e-3):
+        # An expert that got more than its share of the last batch is picked a little less often from now on, and
+        # one that got less, a little more: a step of rate either way, as in the DeepSeek-V3 paper.
+        load = self.load.float()
+        self.bias += rate * torch.sign(load.mean() - load)
 
 
 class Block(nn.Module):

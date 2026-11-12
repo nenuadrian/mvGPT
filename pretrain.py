@@ -144,6 +144,9 @@ def main(minutes, rope=False, bpe=False, diffusion=False, init=None, modern=Fals
         # A rare bad batch can't throw the weights off: the gradient's length is capped at 1.
         torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
         optimizer.step()
+        if experts and balance == "bias":
+            for block in model.blocks:
+                block.mlp.update_bias()
         step += 1
 
         if step % 50 == 0:
@@ -184,8 +187,8 @@ if __name__ == "__main__":
     def option(name, default, kind=int):
         return kind(sys.argv[sys.argv.index(name) + 1]) if name in sys.argv else default
 
-    # --moe N: a mixture of N experts in each block, each token going to --top-k of them (2), with the balancing loss
-    # unless --balance is none. --steps N ends the run after N steps instead of the minutes.
+    # --moe N: a mixture of N experts in each block, each token going to --top-k of them (2), balanced by --balance:
+    # loss (the default), bias, or none. --steps N ends the run after N steps instead of the minutes.
     minutes = float(sys.argv[1]) if len(sys.argv) > 1 and not sys.argv[1].startswith("--") else 10
     main(minutes, rope="--rope" in sys.argv, bpe="--bpe" in sys.argv,
          diffusion="--diffusion" in sys.argv, init=init, modern="--modern" in sys.argv, kv_heads=kv_heads,

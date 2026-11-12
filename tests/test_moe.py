@@ -51,3 +51,22 @@ def test_the_balancing_loss_is_one_when_even_and_grows_when_one_expert_gets_all_
     assert moe.load.tolist()[0] == 4 * 8
     # Expert 0 is one of the two for each token, so it gets half the pairs: 4 x 0.5 x 1, over the 2 picked.
     assert abs(moe.aux_loss.item() - moe.n_expert / moe.top_k) < 1e-3
+
+
+def test_the_bias_picks_the_experts_but_leaves_their_weights_to_the_scores():
+    moe = tiny().blocks[0].mlp
+    x = torch.randn(3, 4, 32)
+    with torch.no_grad():
+        moe.bias[3] = 10.0
+    out = moe(x)
+    # Expert 3 is picked for each token, and gets the weight its score gives it, with the other one picked.
+    assert moe.load.tolist()[3] == 3 * 4
+    probs = torch.softmax(moe.router(x[0, 0]), dim=-1)
+    other = (probs + moe.bias).topk(2).indices[1].item()
+    weights = probs[[3, other]] / probs[[3, other]].sum()
+    expected = weights[0] * moe.expert(3, x[0, 0]) + weights[1] * moe.expert(other, x[0, 0])
+    assert (out[0, 0] - expected).abs().max() < 1e-5
+    # It got more than its share, so update_bias lowers its bias, and raises the bias of the ones that got less.
+    moe.update_bias(rate=0.5)
+    assert moe.bias[3].item() == 9.5
+    assert all(b.item() == 0.5 for i, b in enumerate(moe.bias) if moe.load[i] < moe.load.float().mean())
