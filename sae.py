@@ -1,5 +1,6 @@
 import argparse
 import os
+import textwrap
 import time
 
 import numpy as np
@@ -11,6 +12,7 @@ from torch.utils.tensorboard import SummaryWriter
 from checkpoint import CHECKPOINTS, RUNS, load_checkpoint
 from data import DATA_DIR
 from model import pick_device, rotary
+from sample import write
 
 # A sparse autoencoder on the residual stream after one block: each token's channels written as a sum of a few
 # directions, out of many thousands, the features, which we can then read one at a time.
@@ -262,6 +264,20 @@ def show(args):
             print(f"  {v:5.1f}  {context(tokenizer, ids, at)}")
 
 
+@torch.no_grad()
+def steer(args):
+    device = pick_device()
+    sae, model, tokenizer, layer = load_sae(args.sae, device)
+    # The feature's direction, in the stream's own units, times how strongly we push.
+    push = args.strength * sae.decoder.weight[:, args.feature] / sae.scale
+    for strength, label in ((0, "as it is"), (args.strength, f"feature {args.feature} at {args.strength:g}")):
+        torch.manual_seed(args.seed)
+        with Splice(model, layer, lambda s: s + push * (strength > 0)):
+            text = write(model, tokenizer, args.prompt, args.tokens)
+        print(f"{label}:\n" + textwrap.fill(" ".join(text.split()), width=90, initial_indent="  ",
+                                            subsequent_indent="  ") + "\n")
+
+
 def main():
     parser = argparse.ArgumentParser(description="A sparse autoencoder on a model's residual stream.")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -289,8 +305,15 @@ def main():
     sh.add_argument("features", type=int, nargs="+")
     sh.add_argument("--tokens", type=int, default=500_000)
     sh.add_argument("--examples", type=int, default=6)
+    st = sub.add_parser("steer")
+    st.add_argument("sae")
+    st.add_argument("feature", type=int)
+    st.add_argument("prompt")
+    st.add_argument("--strength", type=float, default=10)
+    st.add_argument("--tokens", type=int, default=60)
+    st.add_argument("--seed", type=int, default=0)
     args = parser.parse_args()
-    {"train": train, "norms": norms, "evaluate": evaluate, "features": features_of, "show": show}[args.command](args)
+    {"train": train, "norms": norms, "evaluate": evaluate, "features": features_of, "show": show, "steer": steer}[args.command](args)
 
 
 if __name__ == "__main__":
