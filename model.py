@@ -268,16 +268,29 @@ class MLP(nn.Module):
 class MoE(nn.Module):
     def __init__(self, config):
         super().__init__()
+        if not config.swiglu:
+            raise ValueError("the experts are SwiGLU MLPs, as in the modern block: set swiglu")
         self.n_expert = config.n_expert
         self.top_k = config.expert_top_k
         # Each expert is an MLP of its own, and a token goes through top_k of them. At the MLP's width divided by
         # top_k, a token costs what it cost with one MLP, while the block holds n_expert / top_k times the weights.
         hidden = config.expert_hidden or mlp_hidden(config) // config.expert_top_k
-        self.experts = nn.ModuleList([MLP(config, hidden) for _ in range(config.n_expert)])
+        # The experts' weights, stacked: expert e's three projections are gate[e], up[e] and down[e], so that one
+        # batched matrix multiply runs all the experts at once, instead of one small multiply per expert.
+        E, C = config.n_expert, config.n_embd
+        self.gate = nn.Parameter(torch.randn(E, C, hidden) * 0.02)
+        self.up = nn.Parameter(torch.randn(E, C, hidden) * 0.02)
+        # Started smaller, like the MLP's down_proj, as it adds into the residual stream.
+        self.down = nn.Parameter(torch.randn(E, hidden, C) * 0.02 / math.sqrt(2 * config.n_layer))
+        self.dropout = nn.Dropout(config.dropout)
         # The router scores each expert for each token, from the token's channels.
         self.router = nn.Linear(config.n_embd, config.n_expert, bias=False)
         self.aux_loss = None  # the last batch's balancing loss
         self.load = None  # and how many of its tokens went to each expert
+
+    def expert(self, e, x):
+        # Expert e on its own, as an MLP runs: for the tests, and to read.
+        return (silu(x @ self.gate[e]) * (x @ self.up[e])) @ self.down[e]
 
     def forward(self, x):
         B, T, C = x.shape
@@ -290,25 +303,25 @@ class MoE(nn.Module):
         # Sort the (token, expert) pairs by expert, so each expert gets its tokens as one block of rows.
         flat = chosen.reshape(-1)
         order = flat.argsort()
+        expert = flat[order]
         token = order // self.top_k
         weight = weights.reshape(-1)[order]
-        rows = x[token]
         counts = torch.bincount(flat, minlength=self.n_expert)
-        out = torch.zeros_like(x)
-        start = 0
-        for expert, n in zip(self.experts, counts.tolist()):
-            end = start + n
-            y = expert(rows[start:end])
-            # Each output scaled by its weight, and added into the row of the token it came from.
-            out.index_add_(0, token[start:end], y * weight[start:end, None])
-            start = end
+        # Each pair's row within its expert's block: its place in the sorted list, minus where its expert starts.
+        slot = torch.arange(flat.numel(), device=x.device) - (counts.cumsum(0) - counts)[expert]
+        # One block per expert, as many rows as the busiest expert has tokens, the rest left as zeros.
+        rows = x.new_zeros(self.n_expert, int(counts.max()), C)
+        rows[expert, slot] = x[token]
+        y = torch.bmm(silu(torch.bmm(rows, self.gate)) * torch.bmm(rows, self.up), self.down)
+        # Each output scaled by its weight, and added into the row of the token it came from.
+        out = torch.zeros_like(x).index_add_(0, token, y[expert, slot] * weight[:, None])
 
         # Switch Transformer's balancing loss: the share of the tokens each expert got, times its average score,
         # summed and times n_expert. Spread evenly, it's 1, and it grows as the router favours a few experts.
         share = counts.float() / flat.numel()
         self.aux_loss = self.n_expert * (share * probs.mean(dim=0)).sum()
         self.load = counts.detach()
-        return out.view(B, T, C)
+        return self.dropout(out).view(B, T, C)
 
 
 class Block(nn.Module):

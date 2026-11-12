@@ -26,13 +26,13 @@ def test_each_token_gets_the_weighted_sum_of_its_top_k_experts():
             probs = torch.softmax(moe.router(x[b, t]), dim=-1)
             best = probs.topk(2).indices
             weights = probs[best] / probs[best].sum()
-            expected = sum(w * moe.experts[e](x[b, t]) for w, e in zip(weights, best))
+            expected = sum(w * moe.expert(e, x[b, t]) for w, e in zip(weights, best))
             assert (out[b, t] - expected).abs().max() < 1e-5
 
 
 def test_an_expert_costs_what_the_mlp_cost_divided_by_top_k():
     moe, mlp = tiny().blocks[0].mlp, tiny(n_expert=0).blocks[0].mlp
-    per_expert = sum(p.numel() for p in moe.experts[0].parameters())
+    per_expert = moe.gate[0].numel() + moe.up[0].numel() + moe.down[0].numel()
     assert per_expert * moe.top_k == sum(p.numel() for p in mlp.parameters())
 
 
