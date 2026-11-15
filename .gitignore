@@ -15,5 +15,7 @@ hf/
 # The C++ tokenizer, built by setup.py
 build/
 *.so
+# The Mojo kernels, compiled by mojo.importer when Python imports them
+__mojocache__/
 # The agent's files, from python agent.py
 sandbox/
