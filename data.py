@@ -3,8 +3,8 @@ import shutil
 import sys
 import time
 import urllib.request
+from collections import deque
 from concurrent.futures import ThreadPoolExecutor
-from multiprocessing import Pool
 
 import numpy as np
 
@@ -78,13 +78,16 @@ def build_bpe():
     return tokenizer
 
 
-def encode_part(text):
-    return _tokenizer.encode_bytes(text)
-
-
-def start_worker(merges="merges.txt"):
-    global _tokenizer
-    _tokenizer = load_tokenizer(bpe=True, merges=merges)
+def in_order(pool, f, items, ahead):
+    # f of each item, on the pool's threads, given back in the items' order. At most `ahead` items are read and
+    # waiting, so a file of 2 GB isn't read into memory before the first piece is written, as pool.map would.
+    waiting = deque()
+    for item in items:
+        waiting.append(pool.submit(f, item))
+        if len(waiting) == ahead:
+            yield waiting.popleft().result()
+    while waiting:
+        yield waiting.popleft().result()
 
 
 def build_full():
@@ -100,7 +103,7 @@ def build_full():
         download(DOWNLOADS["train.txt"], path, max_bytes=None)
     with open(path, "rb") as f:
         text = f.read()
-    # Pieces of about 32 MB, each ending after a story, so they encode as the whole file would, a piece per core.
+    # Pieces of about 32 MB, each ending after a story, so they encode as the whole file would, a piece per thread.
     end_of_text = EOT.encode()
     bounds = [0]
     while bounds[-1] < len(text):
@@ -108,9 +111,9 @@ def build_full():
         bounds.append(len(text) if i < 0 else i + len(end_of_text))
     start = time.time()
     tokens = 0
-    with Pool(os.cpu_count(), initializer=start_worker) as pool, \
-            open(os.path.join(DATA_DIR, "train-full-bpe.bin"), "wb") as out:
-        for ids in pool.imap(encode_part, (text[a:b] for a, b in zip(bounds, bounds[1:]))):
+    pieces = (text[a:b] for a, b in zip(bounds, bounds[1:]))
+    with ThreadPoolExecutor(os.cpu_count()) as pool, open(os.path.join(DATA_DIR, "train-full-bpe.bin"), "wb") as out:
+        for ids in in_order(pool, tokenizer.encode_bytes, pieces, 2 * os.cpu_count()):
             ids.tofile(out)
             tokens += len(ids)
     print(f"train-full-bpe.bin {tokens:>14,} tokens {len(text) / tokens:5.2f} bytes per token "
@@ -179,8 +182,8 @@ def build_web(shards):
             f.write(piece)
     encode(tokenizer, valid, os.path.join(DATA_DIR, "valid-web.bin"))
 
-    # Each file in pieces, a piece per core, appended to one file of tokens. A process gets a fresh tokenizer
-    # after 4 pieces, as the encoder remembers each chunk it has seen, and the web has a lot of them.
+    # Each file in pieces, a piece per thread, appended to one file of tokens. The threads share the tokenizer, as
+    # each call to the C++ encoder has its own cache, of at most 65,536 chunks.
     sizes = []
 
     def measured(pieces):
@@ -190,10 +193,9 @@ def build_web(shards):
 
     start = time.time()
     tokens = 0
-    with Pool(os.cpu_count(), initializer=start_worker, initargs=("web-merges.txt",), maxtasksperchild=4) as pool, \
-            open(os.path.join(DATA_DIR, "train-web.bin"), "wb") as out:
+    with ThreadPoolExecutor(os.cpu_count()) as pool, open(os.path.join(DATA_DIR, "train-web.bin"), "wb") as out:
         for path in paths[:-1]:
-            for ids in pool.imap(encode_part, measured(web_pieces(path))):
+            for ids in in_order(pool, tokenizer.encode_bytes, measured(web_pieces(path)), 2 * os.cpu_count()):
                 ids.tofile(out)
                 tokens += len(ids)
             print(f"{os.path.basename(path):<20}{tokens:>14,} tokens so far {time.time() - start:6.0f}s", flush=True)

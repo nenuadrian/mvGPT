@@ -167,13 +167,15 @@ class LruCache {
 class Encoder {
  public:
   Encoder(const std::vector<Pair>& merges, const std::map<std::string, int>& specials, size_t cache_size)
-      : specials_(specials.begin(), specials.end()), cache_(cache_size) {
+      : specials_(specials.begin(), specials.end()), cache_size_(cache_size) {
     for (size_t r = 0; r < merges.size(); ++r) ranks_[Key(merges[r])] = static_cast<int>(r);
   }
 
   // Each special token's text, such as end of text, becomes its id, and the text between them is encoded on its
-  // own, so that no chunk crosses a special token.
-  std::vector<int> Encode(std::string_view text) {
+  // own, so that no chunk crosses a special token. The cache is the call's own: Encode only reads the encoder, so
+  // threads can share one.
+  std::vector<int> Encode(std::string_view text) const {
+    LruCache cache(cache_size_);
     std::vector<int> ids;
     // Where each special token is next, found again only once we're past it, so the text is searched once.
     std::vector<size_t> next;
@@ -182,7 +184,7 @@ class Encoder {
     while (true) {
       size_t k = std::min_element(next.begin(), next.end()) - next.begin();
       size_t at = k < next.size() ? next[k] : std::string_view::npos;
-      EncodeText(text.substr(start, at == std::string_view::npos ? text.size() - start : at - start), ids);
+      EncodeText(text.substr(start, at == std::string_view::npos ? text.size() - start : at - start), cache, ids);
       if (at == std::string_view::npos) break;
       ids.push_back(specials_[k].second);
       start = at + specials_[k].first.size();
@@ -194,15 +196,15 @@ class Encoder {
   }
 
  private:
-  void EncodeText(std::string_view text, std::vector<int>& ids) {
+  void EncodeText(std::string_view text, LruCache& cache, std::vector<int>& ids) const {
     for (auto chunk : Pretokenize(text)) {
-      const std::vector<int>* cached = cache_.Find(chunk);
+      const std::vector<int>* cached = cache.Find(chunk);
       if (cached) {
         ids.insert(ids.end(), cached->begin(), cached->end());
       } else {
         std::vector<int> encoded = EncodeChunk(chunk);
         ids.insert(ids.end(), encoded.begin(), encoded.end());
-        cache_.Add(chunk, std::move(encoded));
+        cache.Add(chunk, std::move(encoded));
       }
     }
   }
@@ -229,7 +231,7 @@ class Encoder {
 
   std::vector<std::pair<std::string, int>> specials_;
   std::unordered_map<uint64_t, int> ranks_;
-  LruCache cache_;  // chunks repeat a lot: "Once", " upon", " a"
+  size_t cache_size_;  // chunks repeat a lot: "Once", " upon", " a"
 };
 
 // The bytes malloc has handed out and not had back yet: our C++'s memory, and Python's bigger objects, which come from
@@ -267,7 +269,7 @@ PYBIND11_MODULE(bpe, m) {
            py::arg("specials") = std::map<std::string, int>(), py::arg("cache_size") = 1 << 16)
       // UTF-8 bytes in, a NumPy array of ids out. The bytes are read where Python keeps them, and as the C++ doesn't
       // touch Python while it encodes, it lets go of the GIL, so that other threads can run Python meanwhile.
-      .def("encode", [](Encoder& e, py::bytes text) {
+      .def("encode", [](const Encoder& e, py::bytes text) {
         std::string_view s = text;
         std::vector<int> ids;
         {
