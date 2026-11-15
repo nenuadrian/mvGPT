@@ -166,8 +166,9 @@ class LruCache {
 
 class Encoder {
  public:
-  Encoder(const std::vector<Pair>& merges, const std::map<std::string, int>& specials, size_t cache_size)
-      : specials_(specials.begin(), specials.end()), cache_size_(cache_size) {
+  Encoder(const std::vector<Pair>& merges, const std::map<std::string, int>& specials, size_t cache_size,
+          size_t heap_from)
+      : specials_(specials.begin(), specials.end()), cache_size_(cache_size), heap_from_(heap_from) {
     for (size_t r = 0; r < merges.size(); ++r) ranks_[Key(merges[r])] = static_cast<int>(r);
   }
 
@@ -196,6 +197,12 @@ class Encoder {
   }
 
  private:
+  // The heap costs more to set up than a pass over a few pairs, and most chunks are a few bytes long, so a short
+  // one is scanned, and the heap takes the longer ones.
+  std::vector<int> EncodeChunk(std::string_view chunk) const {
+    return chunk.size() < heap_from_ ? EncodeShort(chunk) : EncodeLong(chunk);
+  }
+
   void EncodeText(std::string_view text, LruCache& cache, std::vector<int>& ids) const {
     for (auto chunk : Pretokenize(text)) {
       const std::vector<int>* cached = cache.Find(chunk);
@@ -209,11 +216,31 @@ class Encoder {
     }
   }
 
+  // Applies the merges in the order they were learned: the pair with the lowest rank, until none is left.
+  std::vector<int> EncodeShort(std::string_view chunk) const {
+    std::vector<int> ids(chunk.begin(), chunk.end());
+    for (auto& id : ids) id = static_cast<unsigned char>(id);
+    while (ids.size() > 1) {
+      int best = -1;
+      Pair best_pair;
+      for (size_t i = 0; i + 1 < ids.size(); ++i) {
+        auto r = ranks_.find(Key({ids[i], ids[i + 1]}));
+        if (r != ranks_.end() && (best < 0 || r->second < best)) {
+          best = r->second;
+          best_pair = {ids[i], ids[i + 1]};
+        }
+      }
+      if (best < 0) break;
+      Merge(ids, best_pair, 256 + best);
+    }
+    return ids;
+  }
+
   // Applies the merges in the order they were learned: the lowest rank first, and of the pairs with that rank, the
   // leftmost first. The tokens are a linked list over arrays, so that a merge joins two neighbours without moving
   // the rest, and a heap holds each pair of neighbours that has a merge. A merge changes only the pairs on either
   // side of it, so it costs two pushes onto the heap, where looking at every pair again costs the chunk's length.
-  std::vector<int> EncodeChunk(std::string_view chunk) const {
+  std::vector<int> EncodeLong(std::string_view chunk) const {
     int n = static_cast<int>(chunk.size());
     std::vector<int> ids(n), prev(n), next(n);
     for (int i = 0; i < n; ++i) {
@@ -257,6 +284,7 @@ class Encoder {
   std::vector<std::pair<std::string, int>> specials_;
   std::unordered_map<uint64_t, int> ranks_;
   size_t cache_size_;  // chunks repeat a lot: "Once", " upon", " a"
+  size_t heap_from_;
 };
 
 // The bytes malloc has handed out and not had back yet: our C++'s memory, and Python's bigger objects, which come from
@@ -290,8 +318,10 @@ PYBIND11_MODULE(bpe, m) {
   });
   m.def("allocated", &Allocated);
   py::class_<Encoder>(m, "Encoder")
-      .def(py::init<const std::vector<Pair>&, const std::map<std::string, int>&, size_t>(), py::arg("merges"),
-           py::arg("specials") = std::map<std::string, int>(), py::arg("cache_size") = 1 << 16)
+      // Chunks of heap_from bytes or more are merged off a heap: 16 is where the two ways cross, on an M4 Pro.
+      .def(py::init<const std::vector<Pair>&, const std::map<std::string, int>&, size_t, size_t>(),
+           py::arg("merges"), py::arg("specials") = std::map<std::string, int>(), py::arg("cache_size") = 1 << 16,
+           py::arg("heap_from") = 16)
       // UTF-8 bytes in, a NumPy array of ids out. The bytes are read where Python keeps them, and as the C++ doesn't
       // touch Python while it encodes, it lets go of the GIL, so that other threads can run Python meanwhile.
       .def("encode", [](const Encoder& e, py::bytes text) {

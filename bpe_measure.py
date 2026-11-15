@@ -143,14 +143,34 @@ def doubling(args):
         last = ms
 
 
+def lengths(args):
+    # Chunks of one length at a time, cut from a piece's letters, each on a line of its own, and encoded without a
+    # cache both ways: scanning every pair each time, and off the heap.
+    letters = re.sub(rb"[^A-Za-z]", b"", next(web_pieces(PAGES)))[: 2**21]
+    merges = tokenizer().merges
+    for length in (4, 8, 16, 32, 64, 128, 256):
+        text = b"\n".join(letters[i : i + length] for i in range(0, len(letters), length))
+        chunks = len(letters) // length
+        times = []
+        for heap_from in (2**30, 0):  # never the heap, then always
+            encoder = bpe.Encoder(merges, cache_size=0, heap_from=heap_from)
+            best = 1e9
+            for _ in range(3):
+                start = time.perf_counter()
+                encoder.encode(text)
+                best = min(best, time.perf_counter() - start)
+            times.append(best / chunks * 1e6)
+        print(f"{length:4} bytes: scanning {times[0]:6.2f} µs a chunk, the heap {times[1]:6.2f} µs")
+
+
 def main():
     parser = argparse.ArgumentParser(description="Measures the BPE tokenizer on FineWeb-Edu's pages.")
-    parser.add_argument("what", choices=["memory", "speed", "cache", "profile", "threads", "doubling"])
+    parser.add_argument("what", choices=["memory", "speed", "cache", "profile", "threads", "doubling", "lengths"])
     parser.add_argument("--pieces", type=int, default=8, help="pieces of 32 MB, for memory, speed, cache and threads")
     parser.add_argument("--fresh", action="store_true", help="memory: a new tokenizer for each piece")
     args = parser.parse_args()
     modes = {"memory": memory, "speed": speed, "cache": cache, "profile": profile, "threads": threads,
-             "doubling": doubling}
+             "doubling": doubling, "lengths": lengths}
     modes[args.what](args)
 
 
