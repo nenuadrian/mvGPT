@@ -79,7 +79,7 @@ def build_bpe():
 
 
 def encode_part(text):
-    return np.array(_tokenizer.encode(text.decode("utf-8")), dtype=np.uint16)
+    return _tokenizer.encode_bytes(text)
 
 
 def start_worker(merges="merges.txt"):
@@ -133,19 +133,22 @@ def web_pieces(path, pages=None, size=32 * 2**20):
     # A file's pages, as pieces of text of about 32 MB, in bytes, each page followed by end of text.
     import pyarrow.parquet as pq
 
+    # Each page becomes bytes on its own, and the bytes are joined: joining the pages as one str of 32 MB first
+    # leaves memory behind on macOS each time, as bpe_measure.py memory showed.
+    end_of_text = EOT.encode()
     piece, length, seen = [], 0, 0
     for batch in pq.ParquetFile(path).iter_batches(columns=["text"], batch_size=1024):
         for page in batch.column(0).to_pylist():
-            piece.append(page + EOT)
+            piece.append(page.encode("utf-8") + end_of_text)
             length += len(page)
             seen += 1
             if length >= size or seen == pages:
-                yield "".join(piece).encode("utf-8")
+                yield b"".join(piece)
                 piece, length = [], 0
             if seen == pages:
                 return
     if piece:
-        yield "".join(piece).encode("utf-8")
+        yield b"".join(piece)
 
 
 def build_web(shards):

@@ -1,4 +1,5 @@
 // Byte-level BPE: training merges on a text, and encoding text with them. Exposed to Python with pybind11.
+#include <pybind11/numpy.h>
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 
@@ -8,8 +9,10 @@
 #include <malloc.h>
 #endif
 
+#include <algorithm>
 #include <cstdint>
 #include <list>
+#include <map>
 #include <queue>
 #include <string>
 #include <string_view>
@@ -163,12 +166,35 @@ class LruCache {
 
 class Encoder {
  public:
-  Encoder(const std::vector<Pair>& merges, size_t cache_size) : cache_(cache_size) {
+  Encoder(const std::vector<Pair>& merges, const std::map<std::string, int>& specials, size_t cache_size)
+      : specials_(specials.begin(), specials.end()), cache_(cache_size) {
     for (size_t r = 0; r < merges.size(); ++r) ranks_[Key(merges[r])] = static_cast<int>(r);
   }
 
-  std::vector<int> Encode(const std::string& text) {
+  // Each special token's text, such as end of text, becomes its id, and the text between them is encoded on its
+  // own, so that no chunk crosses a special token.
+  std::vector<int> Encode(std::string_view text) {
     std::vector<int> ids;
+    // Where each special token is next, found again only once we're past it, so the text is searched once.
+    std::vector<size_t> next;
+    for (auto& [special, id] : specials_) next.push_back(text.find(special));
+    size_t start = 0;
+    while (true) {
+      size_t k = std::min_element(next.begin(), next.end()) - next.begin();
+      size_t at = k < next.size() ? next[k] : std::string_view::npos;
+      EncodeText(text.substr(start, at == std::string_view::npos ? text.size() - start : at - start), ids);
+      if (at == std::string_view::npos) break;
+      ids.push_back(specials_[k].second);
+      start = at + specials_[k].first.size();
+      for (size_t j = 0; j < next.size(); ++j) {
+        if (next[j] != std::string_view::npos && next[j] < start) next[j] = text.find(specials_[j].first, start);
+      }
+    }
+    return ids;
+  }
+
+ private:
+  void EncodeText(std::string_view text, std::vector<int>& ids) {
     for (auto chunk : Pretokenize(text)) {
       const std::vector<int>* cached = cache_.Find(chunk);
       if (cached) {
@@ -179,10 +205,8 @@ class Encoder {
         cache_.Add(chunk, std::move(encoded));
       }
     }
-    return ids;
   }
 
- private:
   // Applies the merges in the order they were learned: the pair with the lowest rank, until none is left.
   std::vector<int> EncodeChunk(std::string_view chunk) const {
     std::vector<int> ids(chunk.begin(), chunk.end());
@@ -203,6 +227,7 @@ class Encoder {
     return ids;
   }
 
+  std::vector<std::pair<std::string, int>> specials_;
   std::unordered_map<uint64_t, int> ranks_;
   LruCache cache_;  // chunks repeat a lot: "Once", " upon", " a"
 };
@@ -238,9 +263,11 @@ PYBIND11_MODULE(bpe, m) {
   });
   m.def("allocated", &Allocated);
   py::class_<Encoder>(m, "Encoder")
-      .def(py::init<const std::vector<Pair>&, size_t>(), py::arg("merges"), py::arg("cache_size") = 1 << 16)
+      .def(py::init<const std::vector<Pair>&, const std::map<std::string, int>&, size_t>(), py::arg("merges"),
+           py::arg("specials") = std::map<std::string, int>(), py::arg("cache_size") = 1 << 16)
+      // UTF-8 bytes in, a NumPy array of ids out, and the bytes are read where Python keeps them.
       .def("encode", [](Encoder& e, py::bytes text) {
-        std::string s = text;
-        return e.Encode(s);
+        std::vector<int> ids = e.Encode(std::string_view(text));
+        return py::array_t<int32_t>(ids.size(), ids.data());
       });
 }

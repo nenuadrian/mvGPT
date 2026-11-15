@@ -64,15 +64,11 @@ class WordTokenizer:
         return detokenize(tokens)
 
 
-BPE_SPECIALS_SPLIT = re.compile("(" + re.escape(PAD) + "|" + re.escape(EOT) + ")")
-
-
 class BPETokenizer:
     def __init__(self, merges):
         import bpe  # the C++ module: python setup.py build_ext --inplace
 
         self.merges = [tuple(m) for m in merges]
-        self.encoder = bpe.Encoder(self.merges)
         # Each token's bytes: the 256 single bytes, then, for each merge, its pair's bytes joined.
         self.token_bytes = [bytes([b]) for b in range(256)]
         for a, b in self.merges:
@@ -82,20 +78,18 @@ class BPETokenizer:
         # Any text is bytes, and each byte is a token, so there's no unknown token.
         self.unk_id = None
         self.id_to_token = [t.decode("utf-8", errors="replace") for t in self.token_bytes] + [PAD, EOT]
+        # The C++ finds padding's and end of text's own text, and gives them their ids.
+        self.encoder = bpe.Encoder(self.merges, {PAD.encode(): self.pad_id, EOT.encode(): self.eot_id})
 
     def __len__(self):
         return len(self.id_to_token)
 
     def encode(self, text):
-        ids = []
-        for piece in BPE_SPECIALS_SPLIT.split(text):
-            if piece == PAD:
-                ids.append(self.pad_id)
-            elif piece == EOT:
-                ids.append(self.eot_id)
-            elif piece:
-                ids.extend(self.encoder.encode(piece.encode("utf-8")))
-        return ids
+        return self.encoder.encode(text.encode("utf-8")).tolist()
+
+    def encode_bytes(self, data):
+        # Text that's already UTF-8, to ids as data.py stores them, without a str or a Python list on the way.
+        return self.encoder.encode(data).astype("uint16")
 
     def decode(self, ids, skip_special=True):
         pieces = []

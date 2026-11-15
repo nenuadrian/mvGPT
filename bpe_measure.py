@@ -7,8 +7,6 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from itertools import islice
 
-import numpy as np
-
 import bpe
 from data import DATA_DIR, load_tokenizer, web_pieces
 
@@ -25,7 +23,7 @@ def tokenizer(cache_size=None):
 
 
 def encode(tok, piece):
-    return np.array(tok.encode(piece.decode("utf-8")), dtype=np.uint16)  # as data.py's encode_part does
+    return tok.encode_bytes(piece)  # as data.py's encode_part does
 
 
 def peak_memory():
@@ -40,10 +38,7 @@ def memory(args):
         if args.fresh:
             tok = tokenizer()  # and the last one, with its cache, is freed
         start = time.perf_counter()
-        if args.decode_only:
-            piece.decode("utf-8")  # the first thing encode_part does, and nothing else
-        else:
-            encode(tok, piece)
+        encode(tok, piece)
         seconds = time.perf_counter() - start
         print(f"piece {i + 1}: {len(piece) / 2**20 / seconds:5.1f} MB/s, process peak {peak_memory():6,.0f} MB, "
               f"malloc holds {bpe.allocated() / 2**20:5,.0f} MB")
@@ -126,7 +121,7 @@ def threads(args):
         with ThreadPoolExecutor(n) as pool:
             list(pool.map(lambda piece: encode(tok, piece), pieces))
         seconds = time.perf_counter() - start
-        print(f"{n} threads: {seconds:5.2f}s {megabytes / seconds:6.1f} MB/s")
+        print(f"{n} threads: {seconds:5.2f}s {megabytes / seconds:6.1f} MB/s", flush=True)
 
 
 def doubling(args):
@@ -153,7 +148,6 @@ def main():
     parser.add_argument("what", choices=["memory", "speed", "cache", "profile", "threads", "doubling"])
     parser.add_argument("--pieces", type=int, default=8, help="pieces of 32 MB, for memory, speed, cache and threads")
     parser.add_argument("--fresh", action="store_true", help="memory: a new tokenizer for each piece")
-    parser.add_argument("--decode-only", action="store_true", help="memory: decode each piece, and don't encode it")
     args = parser.parse_args()
     modes = {"memory": memory, "speed": speed, "cache": cache, "profile": profile, "threads": threads,
              "doubling": doubling}
