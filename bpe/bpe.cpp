@@ -265,9 +265,15 @@ PYBIND11_MODULE(bpe, m) {
   py::class_<Encoder>(m, "Encoder")
       .def(py::init<const std::vector<Pair>&, const std::map<std::string, int>&, size_t>(), py::arg("merges"),
            py::arg("specials") = std::map<std::string, int>(), py::arg("cache_size") = 1 << 16)
-      // UTF-8 bytes in, a NumPy array of ids out, and the bytes are read where Python keeps them.
+      // UTF-8 bytes in, a NumPy array of ids out. The bytes are read where Python keeps them, and as the C++ doesn't
+      // touch Python while it encodes, it lets go of the GIL, so that other threads can run Python meanwhile.
       .def("encode", [](Encoder& e, py::bytes text) {
-        std::vector<int> ids = e.Encode(std::string_view(text));
+        std::string_view s = text;
+        std::vector<int> ids;
+        {
+          py::gil_scoped_release release;
+          ids = e.Encode(s);
+        }
         return py::array_t<int32_t>(ids.size(), ids.data());
       });
 }
