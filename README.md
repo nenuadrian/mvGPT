@@ -164,6 +164,10 @@ python sae.py steer checkpoints/sae/sae.pt 5386 "My favourite thing to do at nig
 python bpe_measure.py memory --pieces 6   # the tokenizer on web pages: speed, the process's peak and what malloc holds
 python bpe_measure.py speed      # one thread, the best of three (also: cache, profile, threads, doubling, lengths)
 ./tsan.sh python bpe_measure.py threads --pieces 2   # the threads under ThreadSanitizer
+python -m pytest tests/test_mojo.py   # our Mojo kernels against PyTorch: the logits, a token at a time, and the greedy tokens (macOS)
+python mojo_model.py checkpoints/sft/model.pt "Once upon a time"   # a story written through our Mojo kernels on the GPU
+python mojo_bench.py checkpoints/sft/model.pt   # writing: PyTorch, MLX and our Mojo kernels, taking turns
+mojo run launches.mojo   # what starting a kernel on the GPU and waiting for it cost
 ```
 
 ## Docs

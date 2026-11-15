@@ -122,3 +122,5 @@ Both training runs log to TensorBoard, under `runs/`.
 - [The tokenizer, measured and fixed](bpe-measured.md): the C++ BPE tokenizer measured on web pages, its memory, its
   time, its threads and its long chunks, then an LRU cache, bytes to NumPy, the GIL let go, a data race that
   ThreadSanitizer finds, a cache per call, and a heap for long chunks.
+- [Our GPT's kernels in Mojo](mojo.md): the path a token takes as Mojo GPU kernels called from Python, PyTorch's
+  logits and story, three versions raced against PyTorch and MLX on a Mac, and what a kernel launch costs.

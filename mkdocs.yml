@@ -102,3 +102,4 @@ nav:
   - Our GPT in MLX: mlx.md
   - Features, with a sparse autoencoder: sae.md
   - The tokenizer, measured and fixed: bpe-measured.md
+  - Our GPT's kernels in Mojo: mojo.md
