@@ -17,8 +17,11 @@ from data import DATA_DIR, load_tokenizer, web_pieces
 PAGES = os.path.join(DATA_DIR, "web", "000_00000.parquet")  # the first file, from data.py --web 1
 
 
-def tokenizer():
-    return load_tokenizer(bpe=True, merges="web-merges.txt")
+def tokenizer(cache_size=None):
+    tok = load_tokenizer(bpe=True, merges="web-merges.txt")
+    if cache_size is not None:
+        tok.encoder = bpe.Encoder(tok.merges, cache_size)
+    return tok
 
 
 def encode(tok, piece):
@@ -57,6 +60,27 @@ def speed(args):
             encode(tok, piece)
         times.append(time.perf_counter() - start)
     print(f"{len(pieces)} pieces, one thread: {sum(map(len, pieces)) / 2**20 / min(times):5.1f} MB/s, the best of 3")
+
+
+def cache(args):
+    # The pieces through a tokenizer whose cache holds at most so many chunks, one tokenizer for all the pieces. The
+    # sizes take turns, three rounds of them, and each keeps its quickest, so that whatever else the machine is doing
+    # slows them all alike.
+    pieces = list(islice(web_pieces(PAGES), args.pieces))
+    megabytes = sum(map(len, pieces)) / 2**20
+    sizes = (0, 2**10, 2**12, 2**14, 2**16, 2**18, 2**20)
+    best, held = {}, {}
+    for _ in range(3):
+        for size in sizes:
+            tok = tokenizer(size)
+            before = bpe.allocated()
+            start = time.perf_counter()
+            for piece in pieces:
+                encode(tok, piece)
+            best[size] = min(best.get(size, float("inf")), time.perf_counter() - start)
+            held[size] = bpe.allocated() - before
+    for size in sizes:
+        print(f"{size:>9,} chunks: {megabytes / best[size]:5.1f} MB/s, the cache holds {held[size] / 2**20:5.1f} MB")
 
 
 class Timed:
@@ -126,12 +150,13 @@ def doubling(args):
 
 def main():
     parser = argparse.ArgumentParser(description="Measures the BPE tokenizer on FineWeb-Edu's pages.")
-    parser.add_argument("what", choices=["memory", "speed", "profile", "threads", "doubling"])
-    parser.add_argument("--pieces", type=int, default=8, help="pieces of 32 MB, for memory, speed and threads")
+    parser.add_argument("what", choices=["memory", "speed", "cache", "profile", "threads", "doubling"])
+    parser.add_argument("--pieces", type=int, default=8, help="pieces of 32 MB, for memory, speed, cache and threads")
     parser.add_argument("--fresh", action="store_true", help="memory: a new tokenizer for each piece")
     parser.add_argument("--decode-only", action="store_true", help="memory: decode each piece, and don't encode it")
     args = parser.parse_args()
-    modes = {"memory": memory, "speed": speed, "profile": profile, "threads": threads, "doubling": doubling}
+    modes = {"memory": memory, "speed": speed, "cache": cache, "profile": profile, "threads": threads,
+             "doubling": doubling}
     modes[args.what](args)
 
 

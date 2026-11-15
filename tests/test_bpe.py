@@ -23,6 +23,13 @@ def test_ids_match_the_reference():
     assert bpe.Encoder(merges).encode(text) == reference.encode(text, merges)
 
 
+def test_a_small_cache_gives_the_same_ids():
+    # Two chunks at most, so that most chunks push another out of the cache before they're seen again.
+    merges = reference.train(SAMPLE, 200)
+    text = SAMPLE[-50_000:]
+    assert bpe.Encoder(merges, cache_size=2).encode(text) == reference.encode(text, merges)
+
+
 @pytest.mark.parametrize("text", ["Once upon a time, Lily's dog ran.", "Café, naïve, 日本語, emoji 🙂", "  two  spaces\n\nand lines\t"])
 def test_round_trip(text):
     merges = bpe.train(SAMPLE, 200)

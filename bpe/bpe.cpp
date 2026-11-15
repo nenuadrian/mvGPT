@@ -9,6 +9,7 @@
 #endif
 
 #include <cstdint>
+#include <list>
 #include <queue>
 #include <string>
 #include <string_view>
@@ -127,18 +128,56 @@ std::vector<Pair> Train(const std::string& text, int n_merges) {
   return merges;
 }
 
+// Encoded chunks, at most `capacity` of them: when it's full, the chunk used longest ago makes room. The list keeps
+// them in the order they were used, the most recent at the front, and the map finds a chunk's place in the list,
+// so a lookup, a move to the front and making room each take the same time, however full the cache is.
+class LruCache {
+ public:
+  explicit LruCache(size_t capacity) : capacity_(capacity) {}
+
+  // The chunk's ids, or nullptr if it isn't cached. Finding it makes it the most recent.
+  const std::vector<int>* Find(std::string_view chunk) {
+    auto it = places_.find(chunk);
+    if (it == places_.end()) return nullptr;
+    entries_.splice(entries_.begin(), entries_, it->second);  // moves the entry, without copying it
+    return &it->second->second;
+  }
+
+  void Add(std::string_view chunk, std::vector<int> ids) {
+    if (capacity_ == 0) return;
+    if (entries_.size() == capacity_) {
+      places_.erase(entries_.back().first);
+      entries_.pop_back();
+    }
+    entries_.emplace_front(std::string(chunk), std::move(ids));
+    // The map's key views the list's own copy of the chunk, which stays put as the list's entries move.
+    places_[entries_.front().first] = entries_.begin();
+  }
+
+ private:
+  using Entries = std::list<std::pair<std::string, std::vector<int>>>;
+  size_t capacity_;
+  Entries entries_;
+  std::unordered_map<std::string_view, Entries::iterator> places_;
+};
+
 class Encoder {
  public:
-  explicit Encoder(const std::vector<Pair>& merges) {
+  Encoder(const std::vector<Pair>& merges, size_t cache_size) : cache_(cache_size) {
     for (size_t r = 0; r < merges.size(); ++r) ranks_[Key(merges[r])] = static_cast<int>(r);
   }
 
   std::vector<int> Encode(const std::string& text) {
     std::vector<int> ids;
     for (auto chunk : Pretokenize(text)) {
-      auto cached = cache_.find(std::string(chunk));
-      if (cached == cache_.end()) cached = cache_.emplace(std::string(chunk), EncodeChunk(chunk)).first;
-      ids.insert(ids.end(), cached->second.begin(), cached->second.end());
+      const std::vector<int>* cached = cache_.Find(chunk);
+      if (cached) {
+        ids.insert(ids.end(), cached->begin(), cached->end());
+      } else {
+        std::vector<int> encoded = EncodeChunk(chunk);
+        ids.insert(ids.end(), encoded.begin(), encoded.end());
+        cache_.Add(chunk, std::move(encoded));
+      }
     }
     return ids;
   }
@@ -165,7 +204,7 @@ class Encoder {
   }
 
   std::unordered_map<uint64_t, int> ranks_;
-  std::unordered_map<std::string, std::vector<int>> cache_;  // chunks repeat a lot: "Once", " upon", " a"
+  LruCache cache_;  // chunks repeat a lot: "Once", " upon", " a"
 };
 
 // The bytes malloc has handed out and not had back yet: our C++'s memory, and Python's bigger objects, which come from
@@ -199,7 +238,7 @@ PYBIND11_MODULE(bpe, m) {
   });
   m.def("allocated", &Allocated);
   py::class_<Encoder>(m, "Encoder")
-      .def(py::init<const std::vector<Pair>&>())
+      .def(py::init<const std::vector<Pair>&, size_t>(), py::arg("merges"), py::arg("cache_size") = 1 << 16)
       .def("encode", [](Encoder& e, py::bytes text) {
         std::string s = text;
         return e.Encode(s);
