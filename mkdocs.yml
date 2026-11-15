@@ -101,3 +101,4 @@ nav:
   - A mixture of experts: moe.md
   - Our GPT in MLX: mlx.md
   - Features, with a sparse autoencoder: sae.md
+  - The tokenizer, measured and fixed: bpe-measured.md

@@ -161,6 +161,9 @@ python sae.py train checkpoints/pretrain-web/model.pt   # a sparse autoencoder o
 python sae.py evaluate checkpoints/sae/sae.pt   # the model's loss through it, and with the average token
 python sae.py show checkpoints/sae/sae.pt 1621 1767 5386   # where features fire, and the tokens they raise
 python sae.py steer checkpoints/sae/sae.pt 5386 "My favourite thing to do at night is" --strength 12
+python bpe_measure.py memory --pieces 6   # the tokenizer on web pages: speed, the process's peak and what malloc holds
+python bpe_measure.py speed      # one thread, the best of three (also: cache, profile, threads, doubling, lengths)
+./tsan.sh python bpe_measure.py threads --pieces 2   # the threads under ThreadSanitizer
 ```
 
 ## Docs

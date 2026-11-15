@@ -119,3 +119,6 @@ Both training runs log to TensorBoard, under `runs/`.
   race at writing and training on a Mac, and a run trained in MLX and brought back to PyTorch.
 - [Features, with a sparse autoencoder](sae.md): the attention sink in the stream, a TopK autoencoder trained on the
   web model's stream after block 6, what it costs the model, features for cities, carbon and the moon, and steering.
+- [The tokenizer, measured and fixed](bpe-measured.md): the C++ BPE tokenizer measured on web pages, its memory, its
+  time, its threads and its long chunks, then an LRU cache, bytes to NumPy, the GIL let go, a data race that
+  ThreadSanitizer finds, a cache per call, and a heap for long chunks.
