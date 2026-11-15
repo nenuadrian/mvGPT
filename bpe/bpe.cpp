@@ -2,6 +2,12 @@
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 
+#ifdef __APPLE__
+#include <malloc/malloc.h>
+#else
+#include <malloc.h>
+#endif
+
 #include <cstdint>
 #include <queue>
 #include <string>
@@ -162,6 +168,20 @@ class Encoder {
   std::unordered_map<std::string, std::vector<int>> cache_;  // chunks repeat a lot: "Once", " upon", " a"
 };
 
+// The bytes malloc has handed out and not had back yet: our C++'s memory, and Python's bigger objects, which come from
+// malloc too. A process's memory, as the system counts it, also has memory that was freed and that the allocator
+// hasn't given back.
+size_t Allocated() {
+#ifdef __APPLE__
+  malloc_statistics_t stats;
+  malloc_zone_statistics(nullptr, &stats);
+  return stats.size_in_use;
+#else
+  struct mallinfo2 info = mallinfo2();
+  return info.uordblks + info.hblkhd;
+#endif
+}
+
 }  // namespace
 
 PYBIND11_MODULE(bpe, m) {
@@ -177,6 +197,7 @@ PYBIND11_MODULE(bpe, m) {
     py::gil_scoped_release release;
     return Train(s, n_merges);
   });
+  m.def("allocated", &Allocated);
   py::class_<Encoder>(m, "Encoder")
       .def(py::init<const std::vector<Pair>&>())
       .def("encode", [](Encoder& e, py::bytes text) {
