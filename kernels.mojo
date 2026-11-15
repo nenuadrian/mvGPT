@@ -5,15 +5,20 @@ from std.python import PythonObject
 from std.python.bindings import PythonModuleBuilder
 
 from max.gpu import block_dim, block_idx, global_idx, thread_idx
+from max.gpu.globals import WARP_SIZE
 from max.gpu.host import DeviceBuffer, DeviceContext
+from max.gpu.primitives import warp
 from max.gpu.sync import barrier
 
 # Our GPT writing a token at a time on the GPU, as Mojo kernels: episode one's blocks, with LayerNorm, GELU and a
 # learned embedding per position. mojo_model.py hands it the weights and calls it from Python, a token at a time.
-# This first version runs a thread for each number a kernel writes.
+# The kernels share the work out by warps, groups of 32 threads that run in step, which Apple calls SIMD groups.
 
 comptime Floats = Pointer[Float32, MutAnyOrigin]
 comptime MAX_CONTEXT = 1024
+comptime MAX_HEAD = 128
+comptime THREADS = 256
+comptime WARPS = THREADS // WARP_SIZE
 
 
 def embed(x: Floats, tokens: Floats, positions: Floats, token: Int32, pos: Int32, width: Int32):
@@ -25,66 +30,101 @@ def embed(x: Floats, tokens: Floats, positions: Floats, token: Int32, pos: Int32
 
 
 def layer_norm(y: Floats, x: Floats, weight: Floats, bias: Floats, width: Int32):
-    # Thread c writes channel c, and works out the mean and the variance for itself, as every other thread does.
-    var c = global_idx.x
+    # One warp, 32 threads, for the whole vector. Each lane adds up every 32nd channel, starting at its own, and
+    # warp.sum adds the 32 partial sums together, handing every lane the total.
+    var lane = thread_idx.x
     var C = Int(width)
-    if c < C:
-        var mean: Float32 = 0
-        for i in range(C):
-            mean += x[unsafe_offset=i]
-        mean /= Float32(C)
-        var variance: Float32 = 0
-        for i in range(C):
-            variance += (x[unsafe_offset=i] - mean) ** 2
-        variance /= Float32(C)
-        var normed = (x[unsafe_offset=c] - mean) / sqrt(variance + 1e-5)
-        y[unsafe_offset=c] = normed * weight[unsafe_offset=c] + bias[unsafe_offset=c]
+    var total: Float32 = 0
+    for i in range(lane, C, WARP_SIZE):
+        total += x[unsafe_offset=i]
+    var mean = warp.sum(total) / Float32(C)
+    var squares: Float32 = 0
+    for i in range(lane, C, WARP_SIZE):
+        squares += (x[unsafe_offset=i] - mean) ** 2
+    var std = sqrt(warp.sum(squares) / Float32(C) + 1e-5)
+    for i in range(lane, C, WARP_SIZE):
+        y[unsafe_offset=i] = (x[unsafe_offset=i] - mean) / std * weight[unsafe_offset=i] + bias[unsafe_offset=i]
 
 
 def linear[gelu: Bool, add: Bool](y: Floats, w: Floats, b: Floats, x: Floats, rows: Int32, cols: Int32):
     # y = W x + b, with W stored as PyTorch's Linear stores it: a row of `cols` weights for each of the `rows` outputs.
-    # Thread r writes output r, and walks its row of W on its own.
-    var r = global_idx.x
+    # A warp for each output: its 32 lanes read the row side by side, 4 numbers each at a time, so that together
+    # they read 128 neighbouring numbers, and warp.sum adds up their 32 dot products.
+    var r = global_idx.x // WARP_SIZE
+    var lane = thread_idx.x % WARP_SIZE
     var n = Int(cols)
     if r < Int(rows):
-        var acc = b[unsafe_offset=r]
-        for c in range(n):
-            acc += w[unsafe_offset=r * n + c] * x[unsafe_offset=c]
+        var part: Float32 = 0
+        for c in range(lane * 4, n, WARP_SIZE * 4):
+            part += (w.unsafe_load[width=4](r * n + c) * x.unsafe_load[width=4](c)).reduce_add()
+        var acc = warp.sum(part) + b[unsafe_offset=r]
         # gelu and add are parameters, known when the kernel compiles: each pair of them is its own kernel.
         comptime if gelu:
             acc = 0.5 * acc * (1 + erf(acc / sqrt(Float32(2))))
-        comptime if add:
-            y[unsafe_offset=r] += acc
-        else:
-            y[unsafe_offset=r] = acc
+        if lane == 0:
+            comptime if add:
+                y[unsafe_offset=r] += acc
+            else:
+                y[unsafe_offset=r] = acc
 
 
 def attention(y: Floats, q: Floats, keys: Floats, values: Floats, pos: Int32, head_size: Int32, width: Int32):
-    # A block of threads for each head, and in it, a thread for each of the head's channels.
+    # A block of THREADS threads for each head: WARPS warps, which share out the positions, a position at a time.
     var head = block_idx.x
-    var d = thread_idx.x
+    var lane = thread_idx.x % WARP_SIZE
+    var group = thread_idx.x // WARP_SIZE
     var hs = Int(head_size)
     var C = Int(width)
     var n = Int(pos) + 1
-    # Memory the block's threads share: the new token's score against each token so far.
+    # Memory the block's threads share: the scores, and each warp's share of the sums.
     var scores = unsafe_stack_allocation[MAX_CONTEXT, Float32, address_space=.SHARED]()
-    for t in range(d, n, Int(block_dim.x)):
-        var dot: Float32 = 0
-        for i in range(hs):
-            dot += q[unsafe_offset=head * hs + i] * keys[unsafe_offset=t * C + head * hs + i]
-        scores[unsafe_offset=t] = dot / sqrt(Float32(hs))
-    # Wait until every thread of the block has written its scores.
+    var shares = unsafe_stack_allocation[WARPS * MAX_HEAD, Float32, address_space=.SHARED]()
+    # A score for each position: the warp's lanes split the dot product of the query and that position's key.
+    for t in range(group, n, WARPS):
+        var part: Float32 = 0
+        for i in range(lane, hs, WARP_SIZE):
+            part += q[unsafe_offset=head * hs + i] * keys[unsafe_offset=t * C + head * hs + i]
+        var dot = warp.sum(part)
+        if lane == 0:
+            scores[unsafe_offset=t] = dot / sqrt(Float32(hs))
     barrier()
-    var top = scores[unsafe_offset=0]
-    for t in range(1, n):
+    # The softmax: the largest score, each warp's then the block's, and then the exponentials and their total.
+    var top: Float32 = -3.0e38
+    for t in range(thread_idx.x, n, THREADS):
         top = max(top, scores[unsafe_offset=t])
+    top = warp.max(top)
+    if lane == 0:
+        shares[unsafe_offset=group] = top
+    barrier()
+    for g in range(WARPS):
+        top = max(top, shares[unsafe_offset=g])
+    barrier()
     var total: Float32 = 0
-    var acc: Float32 = 0
-    for t in range(n):
+    for t in range(thread_idx.x, n, THREADS):
         var p = exp(scores[unsafe_offset=t] - top)
+        scores[unsafe_offset=t] = p
         total += p
-        acc += p * values[unsafe_offset=t * C + head * hs + d]
-    y[unsafe_offset=head * hs + d] = acc / total
+    total = warp.sum(total)
+    if lane == 0:
+        shares[unsafe_offset=group] = total
+    barrier()
+    total = 0
+    for g in range(WARPS):
+        total += shares[unsafe_offset=g]
+    barrier()
+    # The output: each warp adds up the values of its positions, its lanes side by side across the channels, and
+    # then a thread for each channel adds up the warps' shares.
+    for d in range(lane, hs, WARP_SIZE):
+        var acc: Float32 = 0
+        for t in range(group, n, WARPS):
+            acc += scores[unsafe_offset=t] * values[unsafe_offset=t * C + head * hs + d]
+        shares[unsafe_offset=group * MAX_HEAD + d] = acc
+    barrier()
+    if thread_idx.x < hs:
+        var acc: Float32 = 0
+        for g in range(WARPS):
+            acc += shares[unsafe_offset=g * MAX_HEAD + thread_idx.x]
+        y[unsafe_offset=head * hs + thread_idx.x] = acc / total
 
 
 def ptr(mut buffer: DeviceBuffer[DType.float32]) -> Floats:
@@ -120,8 +160,8 @@ struct GPT(Movable, Writable):
         var layers = Int(py=args[3])
         var heads = Int(py=args[4])
         var width = Int(py=args[5])
-        if context > MAX_CONTEXT:
-            raise Error("the context window is longer than attention's scores can hold")
+        if context > MAX_CONTEXT or width // heads > MAX_HEAD or width % 4:
+            raise Error("attention holds 1024 scores and heads of up to 128 channels, and linear reads 4 at a time")
         var ctx = DeviceContext()
         # The weights go to the GPU once, and stay there.
         var buffer = ctx.enqueue_create_buffer[DType.float32](Int(py=weights.size))
@@ -171,15 +211,13 @@ struct GPT(Movable, Writable):
         var C = self.width
         var gain = self.next(C)
         var bias = self.next(C)
-        self.ctx.enqueue_function[layer_norm](
-            y, ptr(self.x), gain, bias, Int32(C), grid_dim=ceildiv(C, 128), block_dim=128
-        )
+        self.ctx.enqueue_function[layer_norm](y, ptr(self.x), gain, bias, Int32(C), grid_dim=1, block_dim=WARP_SIZE)
 
     def run_linear[
         gelu: Bool, add: Bool
     ](mut self, y: Floats, w: Floats, b: Floats, x: Floats, rows: Int, cols: Int) raises:
         self.ctx.enqueue_function[linear[gelu, add]](
-            y, w, b, x, Int32(rows), Int32(cols), grid_dim=ceildiv(rows, 128), block_dim=128
+            y, w, b, x, Int32(rows), Int32(cols), grid_dim=ceildiv(rows * WARP_SIZE, THREADS), block_dim=THREADS
         )
 
     def run_layer[gelu: Bool = False, add: Bool = False](mut self, y: Floats, x: Floats, rows: Int, cols: Int) raises:
@@ -214,7 +252,7 @@ struct GPT(Movable, Writable):
             self.run_layer(values.unsafe_offset(pos * C), h, C, C)
             var hs = C // self.heads
             self.ctx.enqueue_function[attention](
-                y, q, keys, values, Int32(pos), Int32(hs), Int32(C), grid_dim=self.heads, block_dim=hs
+                y, q, keys, values, Int32(pos), Int32(hs), Int32(C), grid_dim=self.heads, block_dim=THREADS
             )
             # The output projection, and below it the MLP's down projection, add into the residual stream, x.
             self.run_layer[add=True](x, y, C, C)
