@@ -2,7 +2,9 @@ accelerate>=1.15
 ai-edge-model-explorer>=0.1.33
 gradio>=6.17
 matplotlib>=3.9
+max>=26.7; sys_platform == "darwin"
 mlx>=0.32; sys_platform == "darwin"
+mojo>=1.2; sys_platform == "darwin"
 onnxruntime>=1.31
 optimum-onnx>=0.1
 pybind11>=3.0
