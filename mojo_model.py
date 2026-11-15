@@ -3,6 +3,7 @@ import textwrap
 import time
 
 import numpy as np
+import torch
 
 import mojo.importer  # noqa: F401  (with this imported, `import kernels` compiles kernels.mojo into a module)
 
@@ -35,9 +36,14 @@ def flatten(model):
     # The head's weights are the token embeddings, and as it has no bias, zeros stand in for one.
     parts = [state["embed_tokens.weight"], np.zeros(model.config.vocab_size), state["embed_positions.weight"]]
     for i in range(model.config.n_layer):
-        for name in ["attn_norm", "attn.q_proj", "attn.k_proj", "attn.v_proj", "attn.o_proj", "mlp_norm",
-                     "mlp.up_proj", "mlp.down_proj"]:
-            parts += [state[f"blocks.{i}.{name}.weight"], state[f"blocks.{i}.{name}.bias"]]
+        block = f"blocks.{i}."
+        parts += [state[block + "attn_norm.weight"], state[block + "attn_norm.bias"]]
+        # The query, key and value projections as one Linear layer: their weights one on top of the other, and then
+        # their biases, one after the other.
+        parts += [torch.cat([state[f"{block}attn.{p}_proj.weight"] for p in "qkv"]),
+                  torch.cat([state[f"{block}attn.{p}_proj.bias"] for p in "qkv"])]
+        for name in ["attn.o_proj", "mlp_norm", "mlp.up_proj", "mlp.down_proj"]:
+            parts += [state[block + name + ".weight"], state[block + name + ".bias"]]
     parts += [state["norm.weight"], state["norm.bias"]]
     return np.concatenate([np.asarray(p, dtype=np.float32).ravel() for p in parts])
 
