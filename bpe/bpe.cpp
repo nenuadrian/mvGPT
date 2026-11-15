@@ -209,24 +209,49 @@ class Encoder {
     }
   }
 
-  // Applies the merges in the order they were learned: the pair with the lowest rank, until none is left.
+  // Applies the merges in the order they were learned: the lowest rank first, and of the pairs with that rank, the
+  // leftmost first. The tokens are a linked list over arrays, so that a merge joins two neighbours without moving
+  // the rest, and a heap holds each pair of neighbours that has a merge. A merge changes only the pairs on either
+  // side of it, so it costs two pushes onto the heap, where looking at every pair again costs the chunk's length.
   std::vector<int> EncodeChunk(std::string_view chunk) const {
-    std::vector<int> ids(chunk.begin(), chunk.end());
-    for (auto& id : ids) id = static_cast<unsigned char>(id);
-    while (ids.size() > 1) {
-      int best = -1;
-      Pair best_pair;
-      for (size_t i = 0; i + 1 < ids.size(); ++i) {
-        auto r = ranks_.find(Key({ids[i], ids[i + 1]}));
-        if (r != ranks_.end() && (best < 0 || r->second < best)) {
-          best = r->second;
-          best_pair = {ids[i], ids[i + 1]};
-        }
-      }
-      if (best < 0) break;
-      Merge(ids, best_pair, 256 + best);
+    int n = static_cast<int>(chunk.size());
+    std::vector<int> ids(n), prev(n), next(n);
+    for (int i = 0; i < n; ++i) {
+      ids[i] = static_cast<unsigned char>(chunk[i]);
+      prev[i] = i - 1;
+      next[i] = i + 1;  // n is the end of the list
     }
-    return ids;
+    // A pair as it was when it went on the heap. A merge can change either of its tokens since, and then it's stale,
+    // and skipped when it comes off.
+    struct Candidate {
+      int rank, left, a, b;
+    };
+    auto later = [](const Candidate& x, const Candidate& y) {
+      return x.rank != y.rank ? x.rank > y.rank : x.left > y.left;
+    };
+    std::priority_queue<Candidate, std::vector<Candidate>, decltype(later)> heap(later);
+    auto push = [&](int i) {
+      int j = next[i];
+      if (j == n) return;
+      auto r = ranks_.find(Key({ids[i], ids[j]}));
+      if (r != ranks_.end()) heap.push({r->second, i, ids[i], ids[j]});
+    };
+    for (int i = 0; i + 1 < n; ++i) push(i);
+    while (!heap.empty()) {
+      Candidate c = heap.top();
+      heap.pop();
+      int j = next[c.left];
+      if (ids[c.left] != c.a || j == n || ids[j] != c.b) continue;
+      ids[c.left] = 256 + c.rank;
+      ids[j] = -1;  // merged into its left neighbour, and out of the list
+      next[c.left] = next[j];
+      if (next[j] < n) prev[next[j]] = c.left;
+      if (prev[c.left] >= 0) push(prev[c.left]);
+      push(c.left);
+    }
+    std::vector<int> out;
+    for (int i = 0; i < n; i = next[i]) out.push_back(ids[i]);
+    return out;
   }
 
   std::vector<std::pair<std::string, int>> specials_;

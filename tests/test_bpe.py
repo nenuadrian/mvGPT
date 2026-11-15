@@ -1,4 +1,5 @@
 import os
+import random
 
 import numpy as np
 import pytest
@@ -62,3 +63,21 @@ def test_the_held_out_pages_encode_as_they_did():
     with open(WEB[1], "rb") as f:
         ids = tokenizer.encode_bytes(f.read())
     assert np.array_equal(ids, np.fromfile(WEB[2], dtype=np.uint16))
+
+
+def test_random_texts_match_the_reference():
+    # Texts built from what's most likely to trip a merge loop: runs of one letter, letters without spaces between
+    # them, accents, Chinese and emoji, with spaces and punctuation here and there.
+    merges = [tuple(m) for m in bpe.train(SAMPLE, 500)]
+    encoder = bpe.Encoder(merges, cache_size=0)
+    pieces = ["a", "aa", "aaaa", "the", "ing", "Once", "Lily", " ", "  ", "\n", ".", ",!?", "é", "日本語", "🙂", "x" * 40]
+    rng = random.Random(0)
+    for _ in range(500):
+        text = "".join(rng.choice(pieces) for _ in range(rng.randint(1, 60))).encode("utf-8")
+        assert encoder.encode(text).tolist() == reference.encode(text, merges), text
+
+
+def test_a_long_chunk_matches_the_reference():
+    merges = [tuple(m) for m in bpe.train(SAMPLE, 500)]
+    letters = bytes(b for b in SAMPLE if chr(b).isalpha())[:3000]
+    assert bpe.Encoder(merges).encode(letters).tolist() == reference.encode(letters, merges)
