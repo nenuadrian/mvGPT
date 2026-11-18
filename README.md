@@ -52,6 +52,8 @@ A notebook for each episode runs its commands on its code, as the episode left i
 | 28 | [Attention heads in our GPT, seen and tested](https://youtu.be/Lq4id0KSNWk) | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/nenuadrian/mvGPT/blob/main/notebooks/ep028-attention.ipynb) |
 | 29 | [Hyena, a GPT without attention, measured](https://youtu.be/43X5VL86mXg) | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/nenuadrian/mvGPT/blob/main/notebooks/ep029-hyena.ipynb) |
 | 30 | [GRPO in Hugging Face TRL on our own small GPT](https://youtu.be/MalYv-Ov9N0) | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/nenuadrian/mvGPT/blob/main/notebooks/ep030-trl.ipynb) |
+| 31 | [Mixture of experts from scratch in PyTorch](https://youtu.be/TwfM0aXovPo) | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/nenuadrian/mvGPT/blob/main/notebooks/ep031-moe.ipynb) |
+| 33 | [Sparse autoencoder features inside our GPT](https://youtu.be/34t5PYpZ1W0) | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/nenuadrian/mvGPT/blob/main/notebooks/ep033-sae.ipynb) |
 <!-- /notebooks -->
 
 ## Run it
