@@ -93,8 +93,10 @@ def main():
         gr.Markdown("# mvGPT, as an agent\nA 110-million-parameter GPT from the series "
                     "[Minimum Viable GPT](https://mvgpt.nenuadrian.com), with a calculator, a folder of files, and "
                     "subagents it hands work to. Each session has a folder of its own.")
-        # A folder per session, deleted when the session ends.
-        folder = gr.State(new_session, delete_callback=lambda f: shutil.rmtree(f, ignore_errors=True))
+        # A folder per session, made when the page loads, along with the files table, and deleted when the session
+        # ends. Not the state's initial value: Gradio sets that in a load event of its own, which runs alongside
+        # ours, so the table would read the state before it holds a folder.
+        folder = gr.State(delete_callback=lambda f: f and shutil.rmtree(f, ignore_errors=True))
         with gr.Row():
             with gr.Column(scale=3):
                 chat = gr.Chatbot(label="Agent", height=560)
@@ -107,13 +109,17 @@ def main():
         def ask(text, history, session):
             yield from respond(text, history, session, model, tokenizer)
 
+        def start():
+            session = new_session()
+            return session, files_table(session)
+
         def start_again(session):
             shutil.rmtree(session, ignore_errors=True)
             return new_session()
 
         task.submit(ask, [task, chat, folder], [chat, files]).then(lambda: "", None, task)
         reset.click(start_again, folder, folder).then(files_table, folder, files)
-        demo.load(files_table, folder, files)
+        demo.load(start, None, [folder, files])
     demo.launch(server_port=args.port, theme=THEME)
 
 
