@@ -1,0 +1,24 @@
+cff-version: 1.2.0
+message: "If you use mvGPT in your work, please cite it using the metadata in this file."
+type: software
+title: "mvGPT: a minimum viable GPT"
+abstract: >-
+  A small decoder-only transformer, written from scratch in PyTorch and readable
+  from one end to the other, with 14.6 million parameters trained on
+  TinyStories. It is the code of the YouTube series Minimum Viable GPT, which
+  builds it one tagged step at a time and takes it through the training
+  pipeline of a language model: pretraining, supervised fine-tuning, preference
+  optimisation and reinforcement learning, then deployment.
+authors:
+  - given-names: Adrian Mircea
+    family-names: Nenu
+repository-code: "https://github.com/nenuadrian/mvGPT"
+url: "https://mvgpt.nenuadrian.com"
+license: MIT
+keywords:
+  - language model
+  - transformer
+  - GPT
+  - PyTorch
+  - reinforcement learning
+  - education
